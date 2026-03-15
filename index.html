@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ToDo + Pomodoro</title>
+  <link rel="manifest" href="#" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #faf9f8; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d0cecc; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #b0aeac; }
+    details summary::-webkit-details-marker { display: none; }
+    input[type=date]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+    input[type=time]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+    @keyframes slideFromRight { from { transform: translateX(40%); opacity:0.7; } to { transform: translateX(0); opacity:1; } }
+    @keyframes slideFromLeft  { from { transform: translateX(-40%); opacity:0.7; } to { transform: translateX(0); opacity:1; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyBf9XQNb_bXXg8-Bdln0mh7TznskadlA5Y",
+      authDomain: "todo-pomodoro-247dd.firebaseapp.com",
+      projectId: "todo-pomodoro-247dd",
+      storageBucket: "todo-pomodoro-247dd.firebasestorage.app",
+      messagingSenderId: "802556799588",
+      appId: "1:802556799588:web:79830e2b4e66ef71874d71"
+    });
+    const db = firebase.firestore();
+    const DATA_DOC = db.collection("app").doc("data");
+    let _saveTimer = null;
+  </script>
+
+  <script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const POMODORO_WORK = 25 * 60;
+const POMODORO_BREAK = 5 * 60;
+const POMODORO_LONG_BREAK = 15 * 60;
+const STORAGE_KEY = "todo_pomodoro_standalone_v1";
+
+const DEFAULT_LISTS = [
+  { id: "myday",    name: "My Day",        icon: "sun",      system: true },
+  { id: "important",name: "Important",     icon: "star",     system: true },
+  { id: "planned",  name: "Planned",       icon: "calendar", system: true },
+  { id: "assigned", name: "Assigned to me",icon: "person",   system: true },
+  { id: "tasks",    name: "Tasks",         icon: "home",     system: true },
+];
+
+const THEME_COLORS = [
+  { id:"blue",     color:"#4a67c7", light:"#d6ddf0", bg:"#8a9dd8" },
+  { id:"purple",   color:"#7c4dff", light:"#ddd0ff", bg:"#a98aff" },
+  { id:"pink",     color:"#c94f7c", light:"#f2d4df", bg:"#d88aa5" },
+  { id:"red",      color:"#d13438", light:"#f4cece", bg:"#e07070" },
+  { id:"orange",   color:"#ca5010", light:"#f4dcc8", bg:"#e08050" },
+  { id:"green",    color:"#0b6a0b", light:"#c8e8c8", bg:"#4a9a4a" },
+  { id:"teal",     color:"#038387", light:"#c0e8ea", bg:"#4ab0b3" },
+  { id:"cyan",     color:"#0078d4", light:"#c8e2f8", bg:"#50a0e8" },
+  { id:"gray",     color:"#5d5a58", light:"#dddcdb", bg:"#8a8886" },
+  { id:"darkblue", color:"#2b3f6c", light:"#c8d0e4", bg:"#5a6f9c" },
+  { id:"lavender", color:"#8764b8", light:"#dcd0ec", bg:"#a890d0" },
+  { id:"rose",     color:"#e3008c", light:"#f8c8e8", bg:"#f050b0" },
+];
+
+let colorIdx = 0;
+function nextTheme() { return THEME_COLORS[colorIdx++ % THEME_COLORS.length].id; }
+function genId() { return Math.random().toString(36).slice(2,10); }
+function fmtTime(s) {
+  return `${Math.floor(s/60).toString().padStart(2,"0")}:${(s%60).toString().padStart(2,"0")}`;
+}
+function fmtDate(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("en-US",{day:"numeric",month:"short"});
+}
+function fmtDateTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+}
+function todayStr() {
+  return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+}
+
+function isOverdue(iso) {
+  if (!iso) return false;
+  return new Date(iso) < new Date(new Date().toISOString().split("T")[0]);
+}
+function playBeep(freq=880, dur=0.4, count=2) {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    for(let i=0;i<count;i++){
+      const osc=ctx.createOscillator(), gain=ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value=freq; gain.gain.value=0.25;
+      const t0=ctx.currentTime+i*(dur+0.15);
+      osc.start(t0);
+      gain.gain.setValueAtTime(0.25,t0);
+      gain.gain.exponentialRampToValueAtTime(0.001,t0+dur);
+      osc.stop(t0+dur);
+    }
+  } catch(e){}
+}
+function loadData() {
+  try { const d = localStorage.getItem(STORAGE_KEY); return d ? JSON.parse(d) : null; } catch { return null; }
+}
+function saveData(d) {
+  // Save locally for offline support
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {}
+  // Debounce Firestore writes (1 second after last change)
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    DATA_DOC.set(d).catch(e => console.error("Firestore save error:", e));
+  }, 1000);
+}
+
+// --- Icons ---
+function Ic({ n, sz=20, c="currentColor" }) {
+  const s = { width:sz, height:sz, display:"inline-flex", alignItems:"center", justifyContent:"center", flexShrink:0 };
+  const map = {
+    sun:       <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><circle cx="10" cy="10" r="4"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.93 4.93l1.41 1.41M13.66 13.66l1.41 1.41M4.93 15.07l1.41-1.41M13.66 6.34l1.41-1.41"/></svg>,
+    star:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 2l2.47 5.01L18 7.75l-4 3.9.94 5.5L10 14.26l-4.94 2.89.94-5.5-4-3.9 5.53-.74z"/></svg>,
+    starOn:    <svg style={s} viewBox="0 0 20 20" fill={c} stroke={c} strokeWidth="0.5"><path d="M10 2l2.47 5.01L18 7.75l-4 3.9.94 5.5L10 14.26l-4.94 2.89.94-5.5-4-3.9 5.53-.74z"/></svg>,
+    calendar:  <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><rect x="3" y="4" width="14" height="13" rx="2"/><path d="M3 8h14M7 2v4M13 2v4"/></svg>,
+    person:    <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><circle cx="10" cy="7" r="3"/><path d="M4 17c0-3.31 2.69-6 6-6s6 2.69 6 6"/></svg>,
+    home:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M3 10l7-7 7 7M5 9v7a1 1 0 001 1h3v-4h2v4h3a1 1 0 001-1V9"/></svg>,
+    list:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M4 6h12M4 10h12M4 14h12"/></svg>,
+    chevD:     <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="2"><path d="M6 8l4 4 4-4"/></svg>,
+    chevR:     <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="2"><path d="M8 6l4 4-4 4"/></svg>,
+    plus:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 4v12M4 10h12"/></svg>,
+    check:     <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="2"><path d="M4 10l4 4 8-8"/></svg>,
+    trash:     <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M5 6h10M8 6V4h4v2M6 6v10a1 1 0 001 1h6a1 1 0 001-1V6"/></svg>,
+    x:         <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="2"><path d="M5 5l10 10M15 5L5 15"/></svg>,
+    tomato:    <svg style={s} viewBox="0 0 20 20" fill="none"><circle cx="10" cy="11" r="6" fill="#ef4444" opacity="0.85"/><path d="M8 5c1-2 3-2 4 0" stroke="#22c55e" strokeWidth="1.5" fill="none"/><path d="M10 5V3" stroke="#22c55e" strokeWidth="1.5"/></svg>,
+    menu:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M3 5h14M3 10h14M3 15h14"/></svg>,
+    folder:    <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>,
+    dots:      <svg style={s} viewBox="0 0 20 20" fill={c}><circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/></svg>,
+    dup:       <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><rect x="6" y="6" width="10" height="10" rx="1.5"/><path d="M4 14V5a1.5 1.5 0 011.5-1.5H14"/></svg>,
+    eyeOff:    <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M3 3l14 14M8.5 8.5a2.5 2.5 0 003.5 3.5"/><path d="M4 10s2.5-5 6-5c1 0 1.8.3 2.5.7M16 10s-1.2 2.5-3 3.8"/></svg>,
+    eye:       <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6z"/><circle cx="10" cy="10" r="2.5"/></svg>,
+    rename:    <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M12.5 3.5l4 4L7 17H3v-4l9.5-9.5z"/></svg>,
+    move:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M5 10h10M12 7l3 3-3 3"/></svg>,
+    palette:   <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><circle cx="10" cy="10" r="7"/><circle cx="8" cy="7" r="1" fill={c}/><circle cx="12" cy="7" r="1" fill={c}/><circle cx="6" cy="11" r="1" fill={c}/><circle cx="13" cy="11" r="1" fill={c}/></svg>,
+    bell:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 2a5 5 0 015 5c0 4 2 5 2 5H3s2-1 2-5a5 5 0 015-5zM8.5 17a1.5 1.5 0 003 0"/></svg>,
+    download:  <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 3v10M6 9l4 4 4-4M4 15h12"/></svg>,
+    upload:    <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 13V3M6 7l4-4 4 4M4 15h12"/></svg>,
+  };
+  return map[n] || null;
+}
+
+function CB({ checked, onChange, sz=18, tc }) {
+  return (
+    <div onClick={e=>{e.stopPropagation();onChange();}} style={{
+      width:sz, height:sz, borderRadius:"50%",
+      border: checked ? "none" : "2px solid #8b8b8b",
+      background: checked ? (tc||"#0078d4") : "transparent",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      cursor:"pointer", flexShrink:0, transition:"all 0.15s"
+    }}>
+      {checked && <Ic n="check" sz={Math.round(sz*0.6)} c="white"/>}
+    </div>
+  );
+}
+
+// Context Menu
+function CtxMenu({ x, y, items, onClose }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({left:x, top:y});
+  useEffect(()=>{
+    const h = e => { if(ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return ()=>document.removeEventListener("mousedown", h);
+  },[onClose]);
+  useEffect(()=>{
+    if(ref.current){
+      const rect = ref.current.getBoundingClientRect();
+      let newLeft = x, newTop = y;
+      if(rect.right > window.innerWidth - 4) newLeft = Math.max(4, x - rect.width);
+      if(rect.bottom > window.innerHeight - 4) newTop = Math.max(4, y - rect.height);
+      if(newLeft !== x || newTop !== y) setPos({left:newLeft, top:newTop});
+    }
+  },[]);
+  return (
+    <div ref={ref} style={{
+      position:"fixed", left:pos.left, top:pos.top, zIndex:9999,
+      background:"white", borderRadius:8, padding:"4px 0",
+      boxShadow:"0 4px 20px rgba(0,0,0,0.15), 0 0 2px rgba(0,0,0,0.1)",
+      minWidth:210, fontSize:13
+    }}>
+      {items.map((it,i)=>{
+        if(it.divider) return <div key={i} style={{height:1,background:"#edebe9",margin:"4px 0"}}/>;
+        if(it.submenu) return <SubItem key={i} item={it} onClose={onClose}/>;
+        return (
+          <div key={i} onClick={e=>{e.stopPropagation();it.onClick();onClose();}}
+            style={{padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:it.danger?"#d13438":"#242424"}}
+            onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            {it.icon && <Ic n={it.icon} sz={16} c={it.danger?"#d13438":"#605e5c"}/>}
+            {it.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function SubItem({item, onClose}) {
+  const [open,setOpen]=useState(false);
+  return (
+    <div style={{position:"relative"}} onMouseEnter={()=>setOpen(true)} onMouseLeave={()=>setOpen(false)}>
+      <div style={{padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}
+        onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+        {item.icon && <Ic n={item.icon} sz={16} c="#605e5c"/>}
+        <span style={{flex:1}}>{item.label}</span>
+        <Ic n="chevR" sz={14} c="#a19f9d"/>
+      </div>
+      {open && (
+        <div style={{position:"absolute",left:"100%",top:0,zIndex:10000,background:"white",borderRadius:8,padding:"4px 0",boxShadow:"0 4px 16px rgba(0,0,0,0.14)",minWidth:180}}>
+          {item.submenu.map((s,j)=>(
+            <div key={j} onClick={e=>{e.stopPropagation();s.onClick();onClose();}}
+              style={{padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}
+              onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              {s.icon && <Ic n={s.icon} sz={16} c="#605e5c"/>}
+              {s.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThemePicker({ current, onSelect, onClose }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({right:24, top:100});
+  useEffect(()=>{
+    const h = e => { if(ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return ()=>document.removeEventListener("mousedown", h);
+  },[onClose]);
+  useEffect(()=>{
+    if(ref.current){
+      const rect = ref.current.getBoundingClientRect();
+      if(rect.right > window.innerWidth) setPos({right:Math.max(8,window.innerWidth-rect.width-8),top:100});
+      if(rect.bottom > window.innerHeight) setPos(p=>({...p,top:Math.max(8,window.innerHeight-rect.height-8)}));
+    }
+  },[]);
+  return (
+    <div ref={ref} style={{position:"fixed",right:pos.right,top:pos.top,zIndex:9998,background:"white",borderRadius:12,padding:"16px",boxShadow:"0 8px 32px rgba(0,0,0,0.2)",width:248}}>
+      <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>Pick a theme</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+        {THEME_COLORS.map(tc=>(
+          <div key={tc.id} onClick={()=>{onSelect(tc.id);onClose();}}
+            title={tc.id}
+            style={{width:36,height:36,borderRadius:"50%",background:tc.color,cursor:"pointer",
+              border:current===tc.id?"3px solid #242424":"3px solid transparent",
+              display:"flex",alignItems:"center",justifyContent:"center",transition:"border 0.15s"}}
+            onMouseEnter={e=>{if(current!==tc.id)e.currentTarget.style.border="3px solid #a19f9d";}}
+            onMouseLeave={e=>{if(current!==tc.id)e.currentTarget.style.border="3px solid transparent";}}>
+            {current===tc.id && <Ic n="check" sz={14} c="white"/>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DueDatePicker({ current, onSet, onClose }) {
+  const ref = useRef(null);
+  const [showCal, setShowCal] = useState(false);
+  useEffect(()=>{
+    const h = e => { if(ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return ()=>document.removeEventListener("mousedown", h);
+  },[onClose]);
+  const todayD = new Date();
+  const tomorrowD = new Date(Date.now()+86400000);
+  const nextWeekD = new Date(Date.now()+7*86400000);
+  const fmt = d => d.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  const toISO = d => d.toISOString().split("T")[0];
+  const options = [
+    {label:"Today",    sub:fmt(todayD),    date:toISO(todayD)},
+    {label:"Tomorrow", sub:fmt(tomorrowD), date:toISO(tomorrowD)},
+    {label:"Next week",sub:fmt(nextWeekD), date:toISO(nextWeekD)},
+  ];
+  return (
+    <div ref={ref} style={{position:"absolute",left:0,top:"calc(100% + 4px)",zIndex:200,background:"white",borderRadius:8,padding:"4px 0",boxShadow:"0 4px 20px rgba(0,0,0,0.14)",minWidth:240,fontSize:13}}>
+      {options.map(o=>(
+        <div key={o.label} onClick={()=>{onSet(o.date);onClose();}}
+          style={{padding:"9px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+          onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          <span style={{fontWeight:500}}>{o.label}</span>
+          <span style={{fontSize:11,color:"#a19f9d"}}>{o.sub}</span>
+        </div>
+      ))}
+      <div style={{height:1,background:"#edebe9",margin:"4px 0"}}/>
+      {!showCal ? (
+        <div onClick={()=>setShowCal(true)}
+          style={{padding:"9px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}
+          onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          <Ic n="calendar" sz={14} c="#605e5c"/>
+          <span style={{fontWeight:500}}>Pick a date</span>
+        </div>
+      ) : (
+        <div style={{padding:"10px 16px"}}>
+          <input type="date" autoFocus value={current||""}
+            onChange={e=>{if(e.target.value){onSet(e.target.value);onClose();}}}
+            style={{width:"100%",border:"1px solid #edebe9",borderRadius:4,padding:"6px 8px",fontSize:13,fontFamily:"inherit",outline:"none",color:"#242424"}}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RemindPicker({ onSet, onClose }) {
+  const ref = useRef(null);
+  const [date,setDate]=useState("");
+  const [time,setTime]=useState("09:00");
+  useEffect(()=>{
+    const h = e => { if(ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return ()=>document.removeEventListener("mousedown", h);
+  },[onClose]);
+  function quick(hrs, nextDay=false, nextMon=false) {
+    const d = new Date();
+    if(nextDay){ d.setDate(d.getDate()+1); d.setHours(9,0,0,0); }
+    else if(nextMon){ const day=d.getDay(); d.setDate(d.getDate()+(day===0?1:8-day)); d.setHours(9,0,0,0); }
+    else { d.setHours(d.getHours()+hrs, d.getMinutes(),0,0); }
+    onSet(d.toISOString()); onClose();
+  }
+  function setCustom(){
+    if(!date) return;
+    const dt=new Date(`${date}T${time}`);
+    if(isNaN(dt.getTime())) return;
+    onSet(dt.toISOString()); onClose();
+  }
+  return (
+    <div ref={ref} style={{position:"absolute",left:0,top:"calc(100% + 4px)",zIndex:200,background:"white",borderRadius:8,padding:"8px 0",boxShadow:"0 4px 20px rgba(0,0,0,0.14)",minWidth:230,fontSize:13}}>
+      {[
+        {label:"Later today", sub:"In 3 hours", fn:()=>quick(3)},
+        {label:"Tomorrow",    sub:"9:00 AM",    fn:()=>quick(0,true)},
+        {label:"Next week",   sub:"Mon 9:00 AM",fn:()=>quick(0,false,true)},
+      ].map(q=>(
+        <div key={q.label} onClick={q.fn} style={{padding:"9px 16px",cursor:"pointer",display:"flex",flexDirection:"column"}}
+          onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          <span style={{fontWeight:500}}>{q.label}</span>
+          <span style={{fontSize:11,color:"#a19f9d"}}>{q.sub}</span>
+        </div>
+      ))}
+      <div style={{height:1,background:"#edebe9",margin:"4px 0"}}/>
+      <div style={{padding:"10px 16px"}}>
+        <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>Custom date & time</div>
+        <div style={{display:"flex",gap:6}}>
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+            style={{flex:1,border:"1px solid #edebe9",borderRadius:4,padding:"5px 7px",fontSize:12,fontFamily:"inherit"}}/>
+          <input type="time" value={time} onChange={e=>setTime(e.target.value)}
+            style={{width:82,border:"1px solid #edebe9",borderRadius:4,padding:"5px 7px",fontSize:12,fontFamily:"inherit"}}/>
+        </div>
+        <button onClick={setCustom} style={{marginTop:8,background:"#0078d4",color:"white",border:"none",borderRadius:4,padding:"6px 0",cursor:"pointer",fontSize:12,fontWeight:600,width:"100%",fontFamily:"inherit"}}>
+          Set reminder
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ================= Main App =================
+function App() {
+  const [lists,     setLists]     = useState([]);
+  const [groups,    setGroups]    = useState([]);
+  const [tasks,     setTasks]     = useState([]);
+  const [selList,   setSelList]   = useState("myday");
+  const [selTask,   setSelTask]   = useState(null);
+  const [newText,   setNewText]   = useState("");
+  const [newListN,  setNewListN]  = useState("");
+  const [newGrpN,   setNewGrpN]   = useState("");
+  const [addList,   setAddList]   = useState(false);
+  const [addGrp,    setAddGrp]    = useState(false);
+  const [loaded,    setLoaded]    = useState(false);
+  const [sidebar,   setSidebar]   = useState(true);
+  const [hideComp,  setHideComp]  = useState({});
+  const [renaming,  setRenaming]  = useState(null);
+  const [renameVal, setRenameVal] = useState("");
+  const [ctx,       setCtx]       = useState(null);
+  const [hdMenu,    setHdMenu]    = useState(false);
+  const [themePick, setThemePick] = useState(false);
+  const [dragTask,  setDragTask]  = useState(null);
+  const [dragOver,  setDragOver]  = useState(null);
+  const [dragList,  setDragList]  = useState(null);
+  const [searchQ,   setSearchQ]   = useState("");
+
+  // Mobile
+  const [isMobile,      setIsMobile]      = useState(()=>window.innerWidth<768);
+  const slideDir = useRef("right");
+  const [mobileScreen,  setMobileScreen_]  = useState("lists");
+  const screenOrder = {lists:0,tasks:1,detail:2};
+  function setMobileScreen(s){
+    slideDir.current = screenOrder[s] > screenOrder[mobileScreen] ? "right" : "left";
+    setMobileScreen_(s);
+  }
+  const [showMobileAdd, setShowMobileAdd] = useState(false);
+  const [grpListPicker, setGrpListPicker] = useState(null);
+  const [renamingGrp,   setRenamingGrp]   = useState(null);
+  const [renameGrpVal,  setRenameGrpVal]  = useState("");
+  // Mobile drag-and-drop for lists
+  const [mDrag,         setMDrag]         = useState(null); // { listId, fromGrpId, text, x, y }
+  const [mDragOver,     setMDragOver]     = useState(null); // { type:'group'|'ungroup', id? }
+  const mDragRef   = useRef(null);
+  const mDragTimer = useRef(null);
+
+  // Pomodoro
+  const [pomTask,   setPomTask]   = useState(null);
+  const [pomTime,   setPomTime]   = useState(POMODORO_WORK);
+  const [pomRun,    setPomRun]    = useState(false);
+  const [pomBreak,  setPomBreak]  = useState(false);
+  const [pomCount,  setPomCount]  = useState(0);
+  const timerRef = useRef(null);
+  const pomCountRef = useRef(0);
+
+  // Load
+  useEffect(()=>{
+    // Load from localStorage immediately for fast startup (offline fallback)
+    const local = loadData();
+    if(local){ setLists(local.lists||[]); setGroups(local.groups||[]); setTasks(local.tasks||[]); if(local.hideComp!==undefined) setHideComp(local.hideComp); }
+
+    // Subscribe to Firestore for real-time sync across all devices
+    const unsub = DATA_DOC.onSnapshot(snap => {
+      if(snap.exists) {
+        const d = snap.data();
+        setLists(d.lists||[]);
+        setGroups(d.groups||[]);
+        setTasks(d.tasks||[]);
+        if(d.hideComp!==undefined) setHideComp(d.hideComp);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {}
+      } else if(local) {
+        // First time: push local data to Firestore
+        DATA_DOC.set(local).catch(()=>{});
+      }
+      setLoaded(true);
+    }, err => {
+      console.error("Firestore:", err);
+      setLoaded(true);
+    });
+
+    // Request notification permission
+    if(typeof Notification!=="undefined" && Notification.permission==="default") Notification.requestPermission();
+    return () => unsub();
+  },[]);
+
+  // Save
+  useEffect(()=>{ if(loaded) saveData({lists,groups,tasks,hideComp}); },[lists,groups,tasks,hideComp,loaded]);
+
+  // Mobile resize
+  useEffect(()=>{
+    const h=()=>setIsMobile(window.innerWidth<768);
+    window.addEventListener("resize",h);
+    return ()=>window.removeEventListener("resize",h);
+  },[]);
+
+  // Reminder checker
+  useEffect(()=>{
+    const iv = setInterval(()=>{
+      const now = new Date();
+      setTasks(prev=>{
+        let changed=false;
+        const next=prev.map(t=>{
+          if(t.reminder && !t.reminderFired && new Date(t.reminder)<=now){
+            changed=true;
+            if(typeof Notification!=="undefined" && Notification.permission==="granted"){
+              new Notification("⏰ Reminder",{body:t.text,icon:"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><text y='16' font-size='16'>⏰</text></svg>"});
+            }
+            return {...t, reminderFired:true};
+          }
+          return t;
+        });
+        return changed?next:prev;
+      });
+    }, 10000);
+    return ()=>clearInterval(iv);
+  },[]);
+
+  // Pomodoro timer
+  useEffect(()=>{
+    if(pomRun){
+      timerRef.current=setInterval(()=>{
+        setPomTime(t=>{
+          if(t<=1){
+            clearInterval(timerRef.current);
+            if(!pomBreak){
+              const newCount = pomCountRef.current + 1;
+              pomCountRef.current = newCount;
+              setPomCount(newCount);
+              if(pomTask){
+                setTasks(prev=>prev.map(tk=>{
+                  if(tk.id!==pomTask.taskId) return tk;
+                  if(pomTask.subtaskId) return {...tk,subtasks:tk.subtasks.map(st=>st.id===pomTask.subtaskId?{...st,pomodoros:(st.pomodoros||0)+1}:st)};
+                  return {...tk,pomodoros:(tk.pomodoros||0)+1};
+                }));
+              }
+              const isLong = newCount % 4 === 0;
+              playBeep(880, 0.4, 3);
+              if(typeof Notification!=="undefined"&&Notification.permission==="granted") new Notification("🍅 Pomodoro done!",{body:isLong?"Time for a long break! (15 min)":"Time for a short break! (5 min)"});
+              setPomBreak(true); setPomRun(false); return isLong ? POMODORO_LONG_BREAK : POMODORO_BREAK;
+            } else {
+              playBeep(660, 0.3, 2);
+              if(typeof Notification!=="undefined"&&Notification.permission==="granted") new Notification("☕ Break over",{body:"Back to work!"});
+              setPomBreak(false); setPomRun(false); return POMODORO_WORK;
+            }
+          }
+          return t-1;
+        });
+      },1000);
+    } else clearInterval(timerRef.current);
+    return ()=>clearInterval(timerRef.current);
+  },[pomRun,pomBreak,pomTask]);
+
+  function getCount(lid){
+    return tasks.filter(t=>{
+      if(t.done) return false;
+      if(lid==="myday") return t.myDay;
+      if(lid==="important") return t.important;
+      if(lid==="planned") return !!t.dueDate;
+      if(lid==="assigned") return false;
+      if(lid==="tasks") return !t.listId;
+      return t.listId===lid;
+    }).length;
+  }
+  function getTheme(lid){
+    const l=lists.find(li=>li.id===lid);
+    if(l?.theme) return THEME_COLORS.find(tc=>tc.id===l.theme)||THEME_COLORS[0];
+    const sys={myday:"cyan",important:"pink",planned:"teal",assigned:"green",tasks:"blue"};
+    return THEME_COLORS.find(tc=>tc.id===(sys[lid]||"blue"))||THEME_COLORS[0];
+  }
+
+  const allLists=[...DEFAULT_LISTS,...lists];
+  const ungrouped=lists.filter(l=>!groups.some(g=>g.listIds.includes(l.id)));
+  const hidden=hideComp[selList]||false;
+  const listTasks=tasks.filter(t=>{
+    if(selList==="myday") return t.myDay;
+    if(selList==="important") return t.important;
+    if(selList==="planned") return !!t.dueDate;
+    if(selList==="assigned") return false;
+    if(selList==="tasks") return !t.listId;
+    return t.listId===selList;
+  });
+  const curList=allLists.find(l=>l.id===selList);
+  const curTheme=getTheme(selList);
+  const pending=listTasks.filter(t=>!t.done);
+  const done=listTasks.filter(t=>t.done);
+  const liveTask=selTask?tasks.find(t=>t.id===selTask.id)||selTask:null;
+
+  function addTask(){
+    if(!newText.trim()) return;
+    const t={id:genId(),text:newText.trim(),done:false,important:false,
+      myDay:selList==="myday",
+      listId:(!["myday","important","planned","assigned","tasks"].includes(selList))?selList:null,
+      dueDate:null,notes:"",subtasks:[],pomodoros:0,reminder:null,reminderFired:false,
+      createdAt:new Date().toISOString()};
+    setTasks(p=>[t,...p]); setNewText("");
+  }
+  function toggleDone(id){ setTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t)); }
+  function toggleImp(id){ setTasks(p=>p.map(t=>t.id===id?{...t,important:!t.important}:t)); }
+  function delTask(id){ setTasks(p=>p.filter(t=>t.id!==id)); if(selTask?.id===id)setSelTask(null); if(pomTask?.taskId===id)stopPom(); }
+  function updTask(id,patch){
+    setTasks(p=>p.map(t=>t.id===id?{...t,...patch}:t));
+    if(selTask?.id===id) setSelTask(p=>({...p,...patch}));
+  }
+  function addSub(tid,text){
+    if(!text.trim()) return;
+    const st={id:genId(),text:text.trim(),done:false,pomodoros:0};
+    setTasks(p=>p.map(t=>t.id===tid?{...t,subtasks:[...(t.subtasks||[]),st]}:t));
+    setSelTask(p=>p?.id===tid?{...p,subtasks:[...(p.subtasks||[]),st]}:p);
+  }
+  function togSub(tid,sid){
+    setTasks(p=>p.map(t=>t.id===tid?{...t,subtasks:t.subtasks.map(s=>s.id===sid?{...s,done:!s.done}:s)}:t));
+    setSelTask(p=>p?.id===tid?{...p,subtasks:p.subtasks.map(s=>s.id===sid?{...s,done:!s.done}:s)}:p);
+  }
+  function delSub(tid,sid){
+    setTasks(p=>p.map(t=>t.id===tid?{...t,subtasks:t.subtasks.filter(s=>s.id!==sid)}:t));
+    setSelTask(p=>p?.id===tid?{...p,subtasks:p.subtasks.filter(s=>s.id!==sid)}:p);
+    if(pomTask?.subtaskId===sid) stopPom();
+  }
+  function dropTask(targetId){
+    if(!dragTask||dragTask===targetId) return;
+    setTasks(p=>{
+      const a=[...p];
+      const fi=a.findIndex(t=>t.id===dragTask), ti=a.findIndex(t=>t.id===targetId);
+      if(fi<0||ti<0) return p;
+      const [item]=a.splice(fi,1); a.splice(ti,0,item); return a;
+    });
+    setDragTask(null); setDragOver(null);
+  }
+  function addListFn(gid=null){
+    if(!newListN.trim()) return;
+    const l={id:genId(),name:newListN.trim(),icon:"list",system:false,theme:nextTheme()};
+    setLists(p=>[...p,l]);
+    if(gid) setGroups(p=>p.map(g=>g.id===gid?{...g,listIds:[...g.listIds,l.id]}:g));
+    setNewListN(""); setAddList(false); setSelList(l.id);
+  }
+  function delList(lid){
+    setLists(p=>p.filter(l=>l.id!==lid));
+    setGroups(p=>p.map(g=>({...g,listIds:g.listIds.filter(i=>i!==lid)})));
+    setTasks(p=>p.filter(t=>t.listId!==lid));
+    if(selList===lid) setSelList("tasks");
+  }
+  function renameList(lid,name){
+    if(!name.trim()) return;
+    setLists(p=>p.map(l=>l.id===lid?{...l,name:name.trim()}:l));
+    setRenaming(null); setRenameVal("");
+  }
+  function dupList(lid){
+    const orig=lists.find(l=>l.id===lid); if(!orig) return;
+    const nid=genId();
+    setLists(p=>[...p,{...orig,id:nid,name:orig.name+" (copy)",theme:nextTheme()}]);
+    setTasks(p=>[...p,...tasks.filter(t=>t.listId===lid).map(t=>({...t,id:genId(),listId:nid,subtasks:(t.subtasks||[]).map(s=>({...s,id:genId()}))}))]);
+    setSelList(nid);
+  }
+  function setListTheme(lid,tid){ setLists(p=>p.map(l=>l.id===lid?{...l,theme:tid}:l)); }
+  function addGrpFn(){
+    if(!newGrpN.trim()) return;
+    setGroups(p=>[...p,{id:genId(),name:newGrpN.trim(),expanded:true,listIds:[]}]);
+    setNewGrpN(""); setAddGrp(false);
+  }
+  function makeGroupWith(lid){
+    const l=lists.find(li=>li.id===lid); if(!l) return;
+    const cleaned=groups.map(g=>({...g,listIds:g.listIds.filter(i=>i!==lid)}));
+    setGroups([...cleaned,{id:genId(),name:l.name,expanded:true,listIds:[lid]}]);
+  }
+  function togGrp(gid){ setGroups(p=>p.map(g=>g.id===gid?{...g,expanded:!g.expanded}:g)); }
+  function delGrp(gid){ setGroups(p=>p.filter(g=>g.id!==gid)); }
+  function rmFromGrp(lid){ setGroups(p=>p.map(g=>({...g,listIds:g.listIds.filter(i=>i!==lid)}))); }
+  function mvToGrp(lid,gid){
+    setGroups(p=>p.map(g=>{
+      const f=g.listIds.filter(i=>i!==lid);
+      return g.id===gid?{...g,listIds:[...f,lid],expanded:true}:{...g,listIds:f};
+    }));
+  }
+  function startPom(tid,sid,name){
+    clearInterval(timerRef.current);
+    setPomTask({taskId:tid,subtaskId:sid,name}); setPomTime(POMODORO_WORK); setPomBreak(false); setPomRun(true);
+  }
+  function stopPom(){ clearInterval(timerRef.current); setPomRun(false); setPomTask(null); setPomTime(POMODORO_WORK); setPomBreak(false); }
+  function renameGrp(gid,name){ if(!name.trim())return; setGroups(p=>p.map(g=>g.id===gid?{...g,name:name.trim()}:g)); setRenamingGrp(null); setRenameGrpVal(""); }
+
+  // Mobile drag-and-drop helpers
+  function startListDrag(e, l){
+    e.stopPropagation();
+    e.preventDefault(); // prevent browser long-press context menu
+    const touch = e.touches[0];
+    const fromGrpId = groups.find(g=>g.listIds.includes(l.id))?.id || null;
+    clearTimeout(mDragTimer.current);
+    mDragTimer.current = setTimeout(()=>{
+      const drag = { listId:l.id, fromGrpId, text:l.name, x:touch.clientX, y:touch.clientY };
+      mDragRef.current = drag;
+      setMDrag(drag);
+      if(navigator.vibrate) navigator.vibrate(50);
+    }, 300);
+    const onMove = ev => {
+      clearTimeout(mDragTimer.current);
+      if(!mDragRef.current) return;
+      ev.preventDefault();
+      const t = ev.touches[0];
+      setMDrag(p=>p?{...p,x:t.clientX,y:t.clientY}:null);
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const zone = el?.closest('[data-dropzone]');
+      setMDragOver(zone?{type:zone.dataset.dropzoneType,id:zone.dataset.dropzoneId}:null);
+    };
+    const onEnd = ev => {
+      clearTimeout(mDragTimer.current);
+      document.removeEventListener('touchmove', onMove, {passive:false});
+      document.removeEventListener('touchend', onEnd);
+      if(!mDragRef.current){ mDragRef.current=null; setMDrag(null); setMDragOver(null); return; }
+      const drag = mDragRef.current;
+      const t = ev.changedTouches[0];
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const zone = el?.closest('[data-dropzone]');
+      if(zone){
+        const type = zone.dataset.dropzoneType;
+        const zid  = zone.dataset.dropzoneId;
+        if(type==='group' && zid !== drag.fromGrpId) mvToGrp(drag.listId, zid);
+        else if(type==='ungroup' && drag.fromGrpId) rmFromGrp(drag.listId);
+      }
+      mDragRef.current = null;
+      setMDrag(null);
+      setMDragOver(null);
+    };
+    document.addEventListener('touchmove', onMove, {passive:false});
+    document.addEventListener('touchend',  onEnd);
+  }
+
+  function taskCtx(e,t){
+    e.preventDefault(); e.stopPropagation();
+    const today=new Date().toISOString().split("T")[0];
+    const tomorrow=new Date(Date.now()+86400000).toISOString().split("T")[0];
+    setCtx({x:e.clientX,y:e.clientY,items:[
+      {label:t.myDay?"Remove from My Day":"Add to My Day",icon:"sun",onClick:()=>updTask(t.id,{myDay:!t.myDay})},
+      {label:t.important?"Unmark as Important":"Mark as Important",icon:"star",onClick:()=>toggleImp(t.id)},
+      {label:t.done?"Mark as Not Completed":"Mark as Completed",icon:"check",onClick:()=>toggleDone(t.id)},
+      {divider:true},
+      {label:"Due Today",icon:"calendar",onClick:()=>updTask(t.id,{dueDate:today})},
+      {label:"Due Tomorrow",icon:"calendar",onClick:()=>updTask(t.id,{dueDate:tomorrow})},
+      {label:"Pick a Date",icon:"calendar",submenu:[
+        {label:"Next week",icon:"calendar",onClick:()=>{const d=new Date();const dy=d.getDay();d.setDate(d.getDate()+(dy===0?1:8-dy));updTask(t.id,{dueDate:d.toISOString().split("T")[0]});}},
+        {label:"In 2 weeks",icon:"calendar",onClick:()=>{const d=new Date();d.setDate(d.getDate()+14);updTask(t.id,{dueDate:d.toISOString().split("T")[0]});}},
+        {label:"Remove due date",icon:"x",onClick:()=>updTask(t.id,{dueDate:null})},
+      ]},
+      {divider:true},
+      lists.length>0?{label:"Move task to…",icon:"move",submenu:[
+        {label:"Tasks (no list)",icon:"home",onClick:()=>updTask(t.id,{listId:null})},
+        ...lists.map(l=>({label:l.name,icon:"list",onClick:()=>updTask(t.id,{listId:l.id})}))
+      ]}:null,
+      {divider:true},
+      {label:"Delete Task",icon:"trash",danger:true,onClick:()=>delTask(t.id)},
+    ].filter(Boolean)});
+  }
+
+  function listCtx(e,lid){
+    e.preventDefault(); e.stopPropagation();
+    const l=lists.find(li=>li.id===lid); if(!l) return;
+    const inGrp=groups.find(g=>g.listIds.includes(lid));
+    setCtx({x:e.clientX,y:e.clientY,items:[
+      {label:"Create group",icon:"folder",onClick:()=>makeGroupWith(lid)},
+      groups.length>0?{label:"Move list to…",icon:"move",submenu:groups.map(g=>({label:g.name,icon:"folder",onClick:()=>mvToGrp(lid,g.id)}))}:null,
+      inGrp?{label:"Remove from group",icon:"x",onClick:()=>rmFromGrp(lid)}:null,
+      {divider:true},
+      {label:"Rename list",icon:"rename",onClick:()=>{setRenaming(lid);setRenameVal(l.name);}},
+      {divider:true},
+      {label:"Delete list",icon:"trash",danger:true,onClick:()=>delList(lid)},
+    ].filter(Boolean)});
+  }
+  function grpCtx(e,gid){
+    e.preventDefault(); e.stopPropagation();
+    setCtx({x:e.clientX,y:e.clientY,items:[{label:"Ungroup lists",icon:"x",onClick:()=>delGrp(gid)}]});
+  }
+  function exportData(){
+    const data={tasks,lists,groups,hideComp,pomCount,version:1,exportedAt:new Date().toISOString()};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=`todo-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+  function importData(){
+    const inp=document.createElement("input");
+    inp.type="file"; inp.accept=".json";
+    inp.onchange=e=>{
+      const file=e.target.files[0];
+      if(!file) return;
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        try{
+          const d=JSON.parse(ev.target.result);
+          if(d.tasks) setTasks(d.tasks);
+          if(d.lists) setLists(d.lists);
+          if(d.groups) setGroups(d.groups);
+          if(d.hideComp) setHideComp(d.hideComp);
+          if(d.pomCount!==undefined) setPomCount(d.pomCount);
+          alert("Data imported successfully!");
+        }catch{alert("Invalid backup file");}
+      };
+      reader.readAsText(file);
+    };
+    inp.click();
+  }
+
+  function hdItems(){
+    const isSys=DEFAULT_LISTS.some(l=>l.id===selList);
+    const items=[];
+    if(!isSys){
+      items.push({label:"Rename list",icon:"rename",onClick:()=>{setRenaming(selList);setRenameVal(curList?.name||"");setHdMenu(false);}});
+      if(groups.length>0) items.push({label:"Move list to…",icon:"move",submenu:groups.map(g=>({label:g.name,icon:"folder",onClick:()=>{mvToGrp(selList,g.id);setHdMenu(false);}}))});
+      items.push({label:"Change theme",icon:"palette",onClick:()=>{setThemePick(true);setHdMenu(false);}});
+      items.push({label:"Duplicate list",icon:"dup",onClick:()=>{dupList(selList);setHdMenu(false);}});
+    }
+    items.push({divider:true});
+    items.push({label:hidden?"Show completed":"Hide completed",icon:hidden?"eye":"eyeOff",onClick:()=>{setHideComp(p=>({...p,[selList]:!p[selList]}));setHdMenu(false);}});
+    items.push({divider:true});
+    items.push({label:"Export backup",icon:"download",onClick:()=>{exportData();setHdMenu(false);}});
+    items.push({label:"Import backup",icon:"upload",onClick:()=>{importData();setHdMenu(false);}});
+    if(!isSys){items.push({divider:true});items.push({label:"Delete list",icon:"trash",danger:true,onClick:()=>{delList(selList);setHdMenu(false);}});}
+    return items;
+  }
+
+  function renderListItem(l, indent=false, mob=false){
+    const count=getCount(l.id), active=selList===l.id, isRen=renaming===l.id;
+    const th=getTheme(l.id);
+    const fz = mob?17:14, icSz = mob?22:18, cntFz = mob?14:12;
+    const isDragging = mDrag?.listId===l.id;
+    return (
+      <div key={l.id}
+        draggable={!l.system&&!mob}
+        onDragStart={()=>setDragList(l.id)}
+        onDragEnd={()=>setDragList(null)}
+        onClick={()=>{if(!isRen){setSelList(l.id);setSelTask(null);if(isMobile)setMobileScreen("tasks");}}}
+        onContextMenu={l.system?undefined:e=>listCtx(e,l.id)}
+        style={{
+          display:"flex",alignItems:"center",gap:10,
+          padding:`${mob?12:7}px 12px ${mob?12:7}px ${indent?(mob?14:36):(mob?4:12)}px`,
+          borderRadius:mob?10:4,cursor:"pointer",marginBottom:mob?2:1,
+          background: isDragging?"rgba(0,120,212,0.08)": active?"#d0cec9":"transparent",
+          fontSize:fz, userSelect:"none", transition:"background 0.1s",
+          opacity: isDragging?0.5:1,
+        }}
+        onMouseEnter={e=>{if(!active&&!isDragging)e.currentTarget.style.background=mob?"#f3f2f1":"#dddbd8";}}
+        onMouseLeave={e=>{if(!active&&!isDragging)e.currentTarget.style.background="transparent";}}>
+        {mob&&!l.system&&(
+          <div onTouchStart={e=>startListDrag(e,l)}
+            onContextMenu={e=>{e.preventDefault();e.stopPropagation();}}
+            style={{touchAction:"none",padding:"4px 6px 4px 0",cursor:"grab",flexShrink:0,opacity:0.35}}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="#605e5c"><circle cx="5" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="10" cy="4" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="10" cy="12" r="1.3"/></svg>
+          </div>
+        )}
+        <Ic n={l.icon||"list"} sz={icSz} c={th.color}/>
+        {isRen?(
+          <input autoFocus value={renameVal} onChange={e=>setRenameVal(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter")renameList(l.id,renameVal);if(e.key==="Escape")setRenaming(null);}}
+            onBlur={()=>renameList(l.id,renameVal)}
+            onClick={e=>e.stopPropagation()}
+            style={{flex:1,border:"1px solid #0078d4",borderRadius:3,padding:"2px 6px",fontSize:mob?15:13,outline:"none",fontFamily:"inherit"}}/>
+        ):(
+          <span style={{flex:1,color:"#242424",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:active?600:400}}>{l.name}</span>
+        )}
+        {count>0&&!isRen&&<span style={{fontSize:cntFz,color:"#8a8886"}}>{count}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",fontSize:14,color:"#242424"}}>
+      {/* ========== MOBILE LAYOUT ========== */}
+      {isMobile&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
+
+          {/* SCREEN 1: LISTS */}
+          {mobileScreen==="lists"&&(
+            <div key="scr-lists" style={{display:"flex",flexDirection:"column",height:"100%",background:"white",animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
+              {/* User header */}
+              <div style={{padding:"20px 20px 8px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <div style={{width:46,height:46,borderRadius:"50%",background:"#0078d4",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,flexShrink:0}}>J</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:17,fontWeight:600,color:"#242424"}}>Juan Garcia</div>
+                  <div style={{fontSize:13,color:"#8a8886"}}>enano777@hotmail.com</div>
+                </div>
+              </div>
+              {/* Search */}
+              <div style={{padding:"4px 16px 8px",flexShrink:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,background:"#f3f2f1",borderRadius:10,padding:"9px 12px"}}>
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#8a8886" strokeWidth="1.5"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3"/></svg>
+                  <input placeholder="Search" value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+                    style={{border:"none",background:"transparent",outline:"none",fontSize:15,color:"#242424",flex:1,fontFamily:"inherit"}}/>
+                  {searchQ&&<span onClick={()=>setSearchQ("")} style={{cursor:"pointer",padding:4}}><Ic n="x" sz={14} c="#8a8886"/></span>}
+                </div>
+              </div>
+              {/* List items - scrollable */}
+              <div style={{flex:1,overflowY:mDrag?"hidden":"auto",minHeight:0,padding:"4px 8px"}}>
+                {searchQ.trim()?(()=>{
+                  const q=searchQ.toLowerCase();
+                  const results=tasks.filter(t=>t.text.toLowerCase().includes(q)||(t.notes||"").toLowerCase().includes(q)||(t.subtasks||[]).some(s=>s.text.toLowerCase().includes(q)));
+                  return results.length===0?(
+                    <div style={{textAlign:"center",padding:"40px 20px",color:"#8a8886"}}>
+                      <div style={{fontSize:32,marginBottom:8,opacity:0.5}}>🔍</div>
+                      <div style={{fontSize:16}}>No results for "{searchQ}"</div>
+                    </div>
+                  ):results.map(t=>(
+                    <TRow key={t.id} task={t} tc={getTheme(t.listId||"tasks").color} tl={getTheme(t.listId||"tasks").light}
+                      selected={false} onSelect={()=>{setSelList(t.listId||"tasks");setSelTask(t);setMobileScreen("detail");setSearchQ("");}}
+                      onDone={()=>toggleDone(t.id)} onImp={()=>toggleImp(t.id)}
+                      onPom={()=>startPom(t.id,null,t.text)} onCtx={e=>taskCtx(e,t)}
+                      pomTid={pomTask?.taskId} pomSid={pomTask?.subtaskId} mobile={true}/>
+                  ));
+                })():(
+                <>
+                {DEFAULT_LISTS.map(l=>renderListItem(l,false,true))}
+                <div style={{height:1,background:"#edebe9",margin:"8px 4px"}}/>
+                {groups.map(grp=>{
+                  const gLists=grp.listIds.map(id=>lists.find(l=>l.id===id)).filter(Boolean);
+                  const tot=gLists.reduce((s,l)=>s+getCount(l.id),0);
+                  const isRenGrp=renamingGrp===grp.id;
+                  const isTarget = mDragOver?.type==='group' && mDragOver?.id===grp.id;
+                  return (
+                    <div key={grp.id}>
+                      {/* Group header — ⋮ is now on the RIGHT, before the chevron */}
+                      <div data-dropzone="true" data-dropzone-type="group" data-dropzone-id={grp.id}
+                        style={{display:"flex",alignItems:"center",padding:"10px 4px 10px 12px",userSelect:"none",
+                          borderRadius:10, background:isTarget?"rgba(0,120,212,0.08)":"transparent",
+                          border:isTarget?"1px dashed #0078d4":"1px solid transparent",transition:"all 0.15s"}}>
+                        {isRenGrp?(
+                          <input autoFocus value={renameGrpVal} onChange={e=>setRenameGrpVal(e.target.value)}
+                            onKeyDown={e=>{if(e.key==="Enter")renameGrp(grp.id,renameGrpVal);if(e.key==="Escape")setRenamingGrp(null);}}
+                            onBlur={()=>renameGrp(grp.id,renameGrpVal)}
+                            onClick={e=>e.stopPropagation()}
+                            style={{flex:1,border:"1px solid #0078d4",borderRadius:4,padding:"3px 8px",fontSize:17,fontWeight:600,fontFamily:"inherit",outline:"none"}}/>
+                        ):(
+                          <span style={{flex:1,fontSize:17,fontWeight:600,color:"#242424"}}>{grp.name}</span>
+                        )}
+                        {tot>0&&<span style={{fontSize:14,color:"#8a8886",marginRight:4}}>{tot}</span>}
+                        {/* ⋮ menu — RIGHT side, before chevron */}
+                        <button onClick={e=>{e.stopPropagation();setCtx({x:e.clientX,y:e.clientY,items:[
+                          {label:"Add or remove lists",icon:"list",onClick:()=>setGrpListPicker(grp.id)},
+                          {label:"Rename group",icon:"rename",onClick:()=>{setRenamingGrp(grp.id);setRenameGrpVal(grp.name);}},
+                          {label:"Ungroup lists",icon:"x",onClick:()=>delGrp(grp.id)},
+                        ]});}} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 6px",display:"flex"}}>
+                          <Ic n="dots" sz={20} c="#a19f9d"/>
+                        </button>
+                        <button onClick={()=>togGrp(grp.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 6px",display:"flex"}}>
+                          <span style={{transition:"transform 0.2s",transform:grp.expanded?"rotate(0deg)":"rotate(-90deg)",display:"flex"}}>
+                            <Ic n="chevD" sz={22} c="#605e5c"/>
+                          </span>
+                        </button>
+                      </div>
+                      {grp.expanded&&(
+                        <div style={{borderLeft:"2px solid #d9d7d4",marginLeft:28}}>
+                          {gLists.map(l=>renderListItem(l,true,true))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {/* Ungrouped lists — also a drop zone */}
+                {ungrouped.length>0&&(
+                  <div data-dropzone="true" data-dropzone-type="ungroup"
+                    style={{borderRadius:10,
+                      background:mDragOver?.type==='ungroup'?"rgba(0,180,0,0.07)":"transparent",
+                      border:mDragOver?.type==='ungroup'?"1px dashed #0b6a0b":"1px solid transparent",
+                      transition:"all 0.15s"}}>
+                    {ungrouped.map(l=>renderListItem(l,false,true))}
+                  </div>
+                )}
+                {!ungrouped.length&&mDrag&&groups.length>0&&(
+                  <div data-dropzone="true" data-dropzone-type="ungroup"
+                    style={{margin:"8px 4px",padding:"14px 12px",borderRadius:10,textAlign:"center",
+                      background:mDragOver?.type==='ungroup'?"rgba(0,180,0,0.07)":"#faf9f8",
+                      border:mDragOver?.type==='ungroup'?"1px dashed #0b6a0b":"1px dashed #d9d7d4",
+                      fontSize:14,color:"#8a8886",transition:"all 0.15s"}}>
+                    Drop here to ungroup
+                  </div>
+                )}
+                {addList&&<div style={{padding:"4px 12px"}}><input autoFocus value={newListN} onChange={e=>setNewListN(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addListFn();if(e.key==="Escape"){setAddList(false);setNewListN("");}}} onBlur={()=>{if(newListN.trim())addListFn();else setAddList(false);}} placeholder="List name" style={INP()}/></div>}
+                {addGrp&&<div style={{padding:"4px 12px"}}><input autoFocus value={newGrpN} onChange={e=>setNewGrpN(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addGrpFn();if(e.key==="Escape"){setAddGrp(false);setNewGrpN("");}}} onBlur={()=>{if(newGrpN.trim())addGrpFn();else setAddGrp(false);}} placeholder="Group name" style={INP()}/></div>}
+                </>)}
+              </div>
+              {/* Drag ghost label */}
+              {mDrag&&(
+                <div style={{position:"fixed",left:mDrag.x-20,top:mDrag.y-22,zIndex:9999,
+                  background:"#0078d4",color:"white",borderRadius:20,padding:"8px 18px",
+                  fontSize:15,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",
+                  pointerEvents:"none",whiteSpace:"nowrap",userSelect:"none",
+                  transform:"scale(1.05)",opacity:0.95}}>
+                  {mDrag.text}
+                </div>
+              )}
+              {/* Bottom bar — sticky */}
+              <div style={{padding:"10px 16px",borderTop:"1px solid #edebe9",background:"white",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <button onClick={()=>{setAddList(true);setAddGrp(false);}} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:"8px 0",fontSize:16,color:"#0078d4",fontFamily:"inherit",fontWeight:500}}>
+                  <Ic n="plus" sz={22} c="#0078d4"/> New list
+                </button>
+                <button onClick={()=>{setAddGrp(true);setAddList(false);}} title="New group"
+                  style={{background:"none",border:"none",cursor:"pointer",padding:8,display:"flex",borderRadius:8}}>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0078d4" strokeWidth="1.8" strokeLinecap="round">
+                    <rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/>
+                    <rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 13v8M13 17h8"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SCREEN 2: TASKS */}
+          {mobileScreen==="tasks"&&(
+            <div key="scr-tasks" style={{display:"flex",flexDirection:"column",height:"100%",position:"relative",animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
+              <div style={{position:"absolute",inset:0,zIndex:0,background:`linear-gradient(180deg,${curTheme.color} 0%,${curTheme.bg} 35%,${curTheme.light} 100%)`,opacity:0.6,pointerEvents:"none"}}/>
+              <div style={{position:"absolute",inset:0,zIndex:0,background:"linear-gradient(180deg,transparent 0%,rgba(250,249,248,0.25) 100%)",pointerEvents:"none"}}/>
+              <div style={{padding:"16px 16px 20px",position:"relative",zIndex:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>{setMobileScreen("lists");setSelTask(null);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:8,padding:"6px 8px",cursor:"pointer",display:"flex",alignItems:"center"}}>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="white" strokeWidth="2.5"><path d="M13 4l-7 6 7 6"/></svg>
+                  </button>
+                  <h1 style={{flex:1,margin:0,fontSize:22,fontWeight:700,color:"white",textShadow:"0 1px 3px rgba(0,0,0,0.15)"}}>{curList?.name}</h1>
+                  <HdMenuBtn items={hdItems()} onClose={()=>setHdMenu(false)} open={hdMenu} onToggle={e=>{e.stopPropagation();setHdMenu(o=>!o);}}/>
+                </div>
+                {selList==="myday"&&<div style={{fontSize:13,color:"rgba(255,255,255,0.85)",marginTop:4,textTransform:"capitalize"}}>{todayStr()}</div>}
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"0 12px 100px",position:"relative",zIndex:1}}>
+                {pending.length===0&&done.length===0&&(
+                  <div style={{textAlign:"center",padding:"60px 20px",color:"rgba(255,255,255,0.75)"}}>
+                    <div style={{fontSize:48,marginBottom:12,opacity:0.6}}>{selList==="myday"?"☀️":"✓"}</div>
+                    <div style={{fontSize:16,fontWeight:500}}>No tasks yet</div>
+                    <div style={{fontSize:13,marginTop:4}}>Tap + to add a task</div>
+                  </div>
+                )}
+                {pending.map(t=>(
+                  <TRow key={t.id} task={t} tc={curTheme.color} tl={curTheme.light}
+                    selected={false} onSelect={()=>{setSelTask(t);setMobileScreen("detail");}}
+                    onDone={()=>toggleDone(t.id)} onImp={()=>toggleImp(t.id)}
+                    onPom={()=>startPom(t.id,null,t.text)} onCtx={e=>taskCtx(e,t)}
+                    pomTid={pomTask?.taskId} pomSid={pomTask?.subtaskId} mobile={true}/>
+                ))}
+                {done.length>0&&!hidden&&(
+                  <details style={{marginTop:16}} open>
+                    <summary onClick={e=>e.stopPropagation()} style={{fontSize:13,color:"rgba(255,255,255,0.85)",cursor:"pointer",padding:"8px 0",fontWeight:600,userSelect:"none",listStyle:"none",display:"flex",alignItems:"center",gap:6}}>
+                      <Ic n="chevD" sz={14} c="rgba(255,255,255,0.85)"/> Completed ({done.length})
+                    </summary>
+                    {done.map(t=>(
+                      <TRow key={t.id} task={t} tc={curTheme.color} tl={curTheme.light}
+                        selected={false} onSelect={()=>{setSelTask(t);setMobileScreen("detail");}}
+                        onDone={()=>toggleDone(t.id)} onImp={()=>toggleImp(t.id)}
+                        onPom={()=>startPom(t.id,null,t.text)} onCtx={e=>taskCtx(e,t)}
+                        pomTid={pomTask?.taskId} pomSid={pomTask?.subtaskId} mobile={true}/>
+                    ))}
+                  </details>
+                )}
+              </div>
+              {!showMobileAdd&&(
+                <button onClick={()=>setShowMobileAdd(true)}
+                  style={{position:"fixed",bottom:pomTask?108:24,right:20,width:56,height:56,borderRadius:"50%",background:curTheme.color,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",zIndex:100,transition:"bottom 0.2s"}}>
+                  <Ic n="plus" sz={26} c="white"/>
+                </button>
+              )}
+              {showMobileAdd&&(
+                <div style={{position:"fixed",bottom:0,left:0,right:0,background:"white",borderTop:"1px solid #edebe9",padding:"12px 16px 28px",display:"flex",gap:10,alignItems:"center",zIndex:200,boxShadow:"0 -4px 16px rgba(0,0,0,0.1)"}}>
+                  <Ic n="plus" sz={20} c={curTheme.color}/>
+                  <input autoFocus value={newText} onChange={e=>setNewText(e.target.value)}
+                    onKeyDown={e=>{if(e.key==="Enter"){addTask();setShowMobileAdd(false);}if(e.key==="Escape"){setShowMobileAdd(false);setNewText("");}}}
+                    placeholder="Add a task"
+                    style={{flex:1,border:"none",outline:"none",fontSize:16,color:"#242424",fontFamily:"inherit",background:"transparent"}}/>
+                  {newText.trim()&&<button onClick={()=>{addTask();setShowMobileAdd(false);}}
+                    style={{background:curTheme.color,color:"white",border:"none",borderRadius:6,padding:"8px 16px",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Add</button>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SCREEN 3: DETAIL */}
+          {mobileScreen==="detail"&&liveTask&&(
+            <div key="scr-detail" style={{display:"flex",flexDirection:"column",height:"100%",background:"#faf9f8",animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
+              <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #edebe9",background:"white",flexShrink:0}}>
+                <button onClick={()=>setMobileScreen("tasks")} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 8px 4px 0",display:"flex",alignItems:"center"}}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#605e5c" strokeWidth="2.5"><path d="M13 4l-7 6 7 6"/></svg>
+                </button>
+                <span style={{fontSize:14,color:"#605e5c",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{curList?.name}</span>
+              </div>
+              <div style={{flex:1,overflowY:"auto"}}>
+                <Detail task={liveTask} tc={curTheme.color} mobile={true}
+                  onClose={()=>setMobileScreen("tasks")}
+                  onUpdate={p=>updTask(liveTask.id,p)}
+                  onDelete={()=>{delTask(liveTask.id);setMobileScreen("tasks");}}
+                  onTogSub={sid=>togSub(liveTask.id,sid)}
+                  onAddSub={txt=>addSub(liveTask.id,txt)}
+                  onDelSub={sid=>delSub(liveTask.id,sid)}
+                  onPom={(sid,name)=>startPom(liveTask.id,sid||null,name)}
+                  pomTask={pomTask}/>
+              </div>
+            </div>
+          )}
+
+          {/* GRP LIST PICKER — bottom sheet modal */}
+          {grpListPicker&&(()=>{
+            const grp = groups.find(g=>g.id===grpListPicker);
+            if(!grp) return null;
+            const inGrp = id => grp.listIds.includes(id);
+            const toggleList = id => {
+              setGroups(prev=>prev.map(g=>g.id!==grp.id?g:{
+                ...g,
+                listIds: inGrp(id) ? g.listIds.filter(x=>x!==id) : [...g.listIds, id]
+              }));
+            };
+            return (
+              <div onClick={()=>setGrpListPicker(null)}
+                style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:500,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                <div onClick={e=>e.stopPropagation()}
+                  style={{background:"white",borderRadius:"20px 20px 0 0",padding:"0 0 32px",maxHeight:"80vh",display:"flex",flexDirection:"column"}}>
+                  {/* Handle */}
+                  <div style={{display:"flex",justifyContent:"center",padding:"12px 0 4px"}}>
+                    <div style={{width:40,height:4,borderRadius:2,background:"#d0cecc"}}/>
+                  </div>
+                  {/* Header */}
+                  <div style={{padding:"8px 20px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #edebe9",flexShrink:0}}>
+                    <span style={{fontSize:17,fontWeight:700,color:"#242424"}}>{grp.name}</span>
+                    <button onClick={()=>setGrpListPicker(null)}
+                      style={{background:"none",border:"none",cursor:"pointer",padding:6,display:"flex",borderRadius:8}}>
+                      <Ic n="x" sz={20} c="#605e5c"/>
+                    </button>
+                  </div>
+                  <div style={{fontSize:13,color:"#8a8886",padding:"8px 20px 4px",flexShrink:0}}>
+                    Select lists to include in this group
+                  </div>
+                  {/* List of user lists */}
+                  <div style={{overflowY:"auto",flex:1}}>
+                    {lists.map(l=>{
+                      const checked = inGrp(l.id);
+                      return (
+                        <div key={l.id} onClick={()=>toggleList(l.id)}
+                          style={{display:"flex",alignItems:"center",gap:14,padding:"14px 20px",cursor:"pointer",borderBottom:"1px solid #f3f2f1"}}
+                          onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <div style={{width:24,height:24,borderRadius:"50%",background:checked?"#0078d4":"transparent",border:checked?"none":"2px solid #8b8b8b",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                            {checked&&<Ic n="check" sz={14} c="white"/>}
+                          </div>
+                          <Ic n="list" sz={18} c="#605e5c"/>
+                          <span style={{flex:1,fontSize:16,color:"#242424"}}>{l.name}</span>
+                          <span style={{fontSize:13,color:"#8a8886"}}>{getCount(l.id)||""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Done button */}
+                  <div style={{padding:"16px 20px 0",flexShrink:0}}>
+                    <button onClick={()=>setGrpListPicker(null)}
+                      style={{width:"100%",padding:"14px",background:"#0078d4",color:"white",border:"none",borderRadius:12,fontSize:16,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+        </div>
+      )}
+
+      {/* ========== DESKTOP LAYOUT ========== */}
+      {!isMobile&&<div style={{display:"flex",flex:1,overflow:"hidden"}}>
+        {/* Sidebar */}
+        <div style={{width:sidebar?280:0,transition:"width 0.2s ease",background:"#e8e6e3",borderRight:"1px solid #d9d7d4",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
+          {sidebar&&(
+            <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
+              <div style={{padding:"16px 16px 8px",display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:32,height:32,borderRadius:"50%",background:"#0078d4",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:600}}>J</div>
+                <div>
+                  <div style={{fontSize:14,fontWeight:600}}>Juan Garcia</div>
+                  <div style={{fontSize:11,color:"#8a8886"}}>enano777@hotmail.com</div>
+                </div>
+              </div>
+              <div style={{padding:"8px 12px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,background:"#d9d7d4",borderRadius:4,padding:"6px 10px"}}>
+                  <span style={{color:"#8a8886",fontSize:13}}>🔍</span>
+                  <input placeholder="Search" value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+                    style={{border:"none",background:"transparent",outline:"none",fontSize:13,color:"#242424",flex:1,fontFamily:"inherit"}}/>
+                  {searchQ&&<span onClick={()=>setSearchQ("")} style={{cursor:"pointer",padding:2}}><Ic n="x" sz={12} c="#8a8886"/></span>}
+                </div>
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"4px 8px"}}>
+                {searchQ.trim()?(()=>{
+                  const q=searchQ.toLowerCase();
+                  const results=tasks.filter(t=>t.text.toLowerCase().includes(q)||(t.notes||"").toLowerCase().includes(q)||(t.subtasks||[]).some(s=>s.text.toLowerCase().includes(q)));
+                  return results.length===0?(
+                    <div style={{textAlign:"center",padding:"30px 12px",color:"#8a8886",fontSize:13}}>No results for "{searchQ}"</div>
+                  ):(
+                    <div style={{padding:"4px 0"}}>
+                      <div style={{fontSize:11,fontWeight:600,color:"#8a8886",padding:"4px 12px 8px",textTransform:"uppercase"}}>{results.length} result{results.length!==1?"s":""}</div>
+                      {results.map(t=>{
+                        const listName=allLists.find(l=>l.id===(t.listId||"tasks"))?.name||"Tasks";
+                        return (
+                          <div key={t.id} onClick={()=>{setSelList(t.listId||"tasks");setSelTask(t);setSearchQ("");}}
+                            style={{padding:"6px 12px",cursor:"pointer",borderRadius:4,display:"flex",alignItems:"center",gap:8,fontSize:13}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#dddbd8"}
+                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <CB checked={t.done} onChange={()=>toggleDone(t.id)} sz={16} tc={getTheme(t.listId||"tasks").color}/>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:t.done?"line-through":"none",color:t.done?"#8a8886":"#242424"}}>{t.text}</div>
+                              <div style={{fontSize:11,color:"#a19f9d"}}>{listName}</div>
+                            </div>
+                            {t.important&&<Ic n="starOn" sz={14} c="#ffc83d"/>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })():(
+                <>
+                {DEFAULT_LISTS.map(l=>renderListItem(l))}
+                <div style={{height:1,background:"#d0cecc",margin:"8px 4px"}}/>
+                {groups.map(grp=>{
+                  const gLists=grp.listIds.map(id=>lists.find(l=>l.id===id)).filter(Boolean);
+                  const tot=gLists.reduce((s,l)=>s+getCount(l.id),0);
+                  return (
+                    <div key={grp.id}>
+                      <div style={{display:"flex",alignItems:"center",gap:4,padding:"8px 12px",cursor:"pointer",borderRadius:4,userSelect:"none"}}
+                        onClick={()=>togGrp(grp.id)}
+                        onContextMenu={e=>grpCtx(e,grp.id)}
+                        onDragOver={e=>e.preventDefault()}
+                        onDrop={e=>{e.preventDefault();if(dragList){mvToGrp(dragList,grp.id);setDragList(null);}}}>
+                        <span style={{transition:"transform 0.2s",transform:grp.expanded?"rotate(0)":"rotate(-90deg)",display:"flex"}}><Ic n="chevD" sz={16} c="#605e5c"/></span>
+                        <Ic n="folder" sz={16} c="#605e5c"/>
+                        <span style={{flex:1,fontSize:13,fontWeight:600,color:"#605e5c"}}>{grp.name}</span>
+                        {tot>0&&<span style={{fontSize:11,color:"#8a8886"}}>{tot}</span>}
+                      </div>
+                      {grp.expanded&&gLists.map(l=>renderListItem(l,true))}
+                    </div>
+                  );
+                })}
+                {ungrouped.map(l=>renderListItem(l))}
+                {addList&&<div style={{padding:"4px 12px"}}><input autoFocus value={newListN} onChange={e=>setNewListN(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addListFn();if(e.key==="Escape"){setAddList(false);setNewListN("");}}} onBlur={()=>{if(newListN.trim())addListFn();else setAddList(false);}} placeholder="List name" style={INP()}/></div>}
+                {addGrp&&<div style={{padding:"4px 12px"}}><input autoFocus value={newGrpN} onChange={e=>setNewGrpN(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addGrpFn();if(e.key==="Escape"){setAddGrp(false);setNewGrpN("");}}} onBlur={()=>{if(newGrpN.trim())addGrpFn();else setAddGrp(false);}} placeholder="Group name" style={INP()}/></div>}
+                </>)}
+              </div>
+              <div style={{padding:"8px 12px",borderTop:"1px solid #d0cecc",display:"flex",gap:4}}>
+                <button onClick={()=>{setAddList(true);setAddGrp(false);}} style={BotBtn()}><Ic n="plus" sz={16} c="#605e5c"/> <span>New list</span></button>
+                <button onClick={()=>{setAddGrp(true);setAddList(false);}} style={BotBtn()}><Ic n="folder" sz={16} c="#605e5c"/> <span>New group</span></button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Main area */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}
+          onClick={()=>setSelTask(null)}>
+          {/* Full gradient background */}
+          <div style={{position:"absolute",inset:0,zIndex:0,background:`linear-gradient(180deg, ${curTheme.color} 0%, ${curTheme.bg} 35%, ${curTheme.light} 100%)`,opacity:0.6,pointerEvents:"none"}}/>
+          <div style={{position:"absolute",inset:0,zIndex:0,background:"linear-gradient(180deg,transparent 0%,rgba(250,249,248,0.25) 100%)",pointerEvents:"none"}}/>
+
+          {/* Header */}
+          <div style={{padding:"28px 32px 20px",position:"relative",zIndex:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <button onClick={()=>setSidebar(s=>!s)} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:4,padding:4,cursor:"pointer",marginRight:4}}>
+                <Ic n="menu" sz={18} c="white"/>
+              </button>
+              <h1 style={{margin:0,fontSize:24,fontWeight:700,letterSpacing:-0.5,flex:1,color:"white",textShadow:"0 1px 3px rgba(0,0,0,0.15)"}}>{curList?.name}</h1>
+              <HdMenuBtn items={hdItems()} onClose={()=>setHdMenu(false)} open={hdMenu} onToggle={e=>{e.stopPropagation();setHdMenu(o=>!o);}}/>
+            </div>
+            {selList==="myday"&&<div style={{fontSize:13,color:"rgba(255,255,255,0.85)",marginTop:2,textTransform:"capitalize"}}>{todayStr()}</div>}
+          </div>
+
+          {/* Add task */}
+          <div style={{padding:"4px 24px 4px",position:"relative",zIndex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,background:"rgba(255,255,255,0.75)",border:"1px solid rgba(255,255,255,0.4)",borderRadius:4,padding:"8px 14px",boxShadow:"0 1px 3px rgba(0,0,0,0.08)",backdropFilter:"blur(12px)"}}>
+              <Ic n="plus" sz={18} c={curTheme.color}/>
+              <input value={newText} onChange={e=>setNewText(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&addTask()}
+                onClick={e=>e.stopPropagation()}
+                placeholder="Add a task"
+                style={{flex:1,border:"none",outline:"none",fontSize:14,color:"#242424",fontFamily:"inherit",background:"transparent"}}/>
+              {newText&&<button onClick={e=>{e.stopPropagation();addTask();}} style={PBtn(curTheme.color)}>Add</button>}
+            </div>
+          </div>
+
+          {/* Task list */}
+          <div style={{flex:1,overflowY:"auto",padding:"8px 24px 24px",position:"relative",zIndex:1}}
+            onClick={e=>{if(e.target===e.currentTarget)setSelTask(null);}}>
+            {pending.length===0&&done.length===0&&(
+              <div style={{textAlign:"center",padding:"60px 20px",color:"rgba(255,255,255,0.75)"}}>
+                <div style={{fontSize:48,marginBottom:12,opacity:0.6}}>{selList==="myday"?"☀️":"✓"}</div>
+                <div style={{fontSize:16,fontWeight:500}}>{selList==="myday"?"Focus on your day":"No tasks yet"}</div>
+                <div style={{fontSize:13,marginTop:4}}>Add tasks to get started</div>
+              </div>
+            )}
+            {pending.map(t=>(
+              <TRow key={t.id} task={t} tc={curTheme.color} tl={curTheme.light}
+                selected={liveTask?.id===t.id}
+                onSelect={()=>setSelTask(liveTask?.id===t.id?null:t)}
+                onDone={()=>toggleDone(t.id)}
+                onImp={()=>toggleImp(t.id)}
+                onPom={()=>startPom(t.id,null,t.text)}
+                onCtx={e=>taskCtx(e,t)}
+                pomTid={pomTask?.taskId} pomSid={pomTask?.subtaskId}
+                draggable onDragStart={()=>setDragTask(t.id)}
+                onDragEnd={()=>{setDragTask(null);setDragOver(null);}}
+                onDragOver={()=>setDragOver(t.id)}
+                onDrop={()=>dropTask(t.id)}
+                dragOver={dragOver===t.id}
+              />
+            ))}
+            {done.length>0&&!hidden&&(
+              <details style={{marginTop:16}} open>
+                <summary onClick={e=>e.stopPropagation()} style={{fontSize:13,color:"rgba(255,255,255,0.85)",cursor:"pointer",padding:"8px 0",fontWeight:600,userSelect:"none",listStyle:"none",display:"flex",alignItems:"center",gap:6}}>
+                  <Ic n="chevD" sz={14} c="rgba(255,255,255,0.85)"/> Completed ({done.length})
+                </summary>
+                {done.map(t=>(
+                  <TRow key={t.id} task={t} tc={curTheme.color} tl={curTheme.light}
+                    selected={liveTask?.id===t.id}
+                    onSelect={()=>setSelTask(liveTask?.id===t.id?null:t)}
+                    onDone={()=>toggleDone(t.id)} onImp={()=>toggleImp(t.id)}
+                    onPom={()=>startPom(t.id,null,t.text)}
+                    onCtx={e=>taskCtx(e,t)}
+                    pomTid={pomTask?.taskId} pomSid={pomTask?.subtaskId}
+                  />
+                ))}
+              </details>
+            )}
+          </div>
+        </div>
+
+        {/* Detail panel */}
+        {liveTask&&(
+          <Detail task={liveTask} tc={curTheme.color}
+            onClose={()=>setSelTask(null)}
+            onUpdate={p=>updTask(liveTask.id,p)}
+            onDelete={()=>delTask(liveTask.id)}
+            onTogSub={sid=>togSub(liveTask.id,sid)}
+            onAddSub={txt=>addSub(liveTask.id,txt)}
+            onDelSub={sid=>delSub(liveTask.id,sid)}
+            onPom={(sid,name)=>startPom(liveTask.id,sid||null,name)}
+            pomTask={pomTask}
+          />
+        )}
+      </div>}
+
+      {ctx&&<CtxMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={()=>setCtx(null)}/>}
+      {themePick&&!DEFAULT_LISTS.some(l=>l.id===selList)&&(
+        <ThemePicker current={lists.find(l=>l.id===selList)?.theme} onSelect={tid=>setListTheme(selList,tid)} onClose={()=>setThemePick(false)}/>
+      )}
+      {pomTask&&(
+        <PomWidget
+          pomTask={pomTask} pomTime={pomTime} pomRun={pomRun}
+          pomBreak={pomBreak} pomCount={pomCount} allTasks={tasks}
+          onPause={()=>setPomRun(r=>!r)}
+          onStop={stopPom}
+          onDone={()=>{
+            if(pomTask.subtaskId){
+              togSub(pomTask.taskId,pomTask.subtaskId);
+            } else {
+              toggleDone(pomTask.taskId);
+            }
+            stopPom();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function HdMenuBtn({items, open, onToggle, onClose}) {
+  const ref = useRef(null);
+  useEffect(()=>{
+    if(!open) return;
+    const h = e => { if(ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return ()=>document.removeEventListener("mousedown", h);
+  },[open,onClose]);
+  return (
+    <div ref={ref} style={{position:"relative"}}>
+      <button onClick={onToggle} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:4,padding:"4px 8px",cursor:"pointer"}}>
+        <Ic n="dots" sz={18} c="white"/>
+      </button>
+      {open&&(
+        <div onClick={e=>e.stopPropagation()} style={{position:"absolute",right:0,top:"calc(100% + 4px)",zIndex:9999,background:"white",borderRadius:8,padding:"4px 0",boxShadow:"0 4px 20px rgba(0,0,0,0.15)",minWidth:210,fontSize:13}}>
+          {items.map((it,i)=>{
+            if(!it) return null;
+            if(it.divider) return <div key={i} style={{height:1,background:"#edebe9",margin:"4px 0"}}/>;
+            if(it.submenu) return <SubItem key={i} item={it} onClose={onClose}/>;
+            return (
+              <div key={i} onClick={()=>it.onClick()}
+                style={{padding:"8px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:it.danger?"#d13438":"#242424"}}
+                onMouseEnter={e=>e.currentTarget.style.background="#f3f2f1"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                {it.icon && <Ic n={it.icon} sz={16} c={it.danger?"#d13438":"#605e5c"}/>}
+                <span>{it.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PomWidget({pomTask, pomTime, pomRun, pomBreak, pomCount, allTasks, onPause, onStop, onDone}) {
+  if(!pomTask) return null;
+  const isLongBreak = pomBreak && (pomCount % 4 === 0);
+  const total = pomBreak ? (isLongBreak ? POMODORO_LONG_BREAK : POMODORO_BREAK) : POMODORO_WORK;
+  const elapsed = total - pomTime;
+  const progress = elapsed / total;
+  const R = 52;
+  const C = 2 * Math.PI * R;
+  const dashLen = C * progress;
+  const gapLen = C - dashLen;
+  const workColor = "#e85c4a";
+  const breakColor = "#16a34a";
+  const accent = pomBreak ? breakColor : workColor;
+  const task = allTasks ? allTasks.find(t => t.id === pomTask.taskId) : null;
+  const taskName = pomTask.name || "Task";
+  const breakLabel = isLongBreak ? "Long break 🎉" : "Short break ☕";
+  const dailyGoal = 8;
+  const [dragging, setDragging] = React.useState(false);
+  const [pos, setPos] = React.useState({right:24, bottom:24});
+  const dragRef = React.useRef(null);
+  function onMouseDown(e) {
+    if(e.target.tagName==="BUTTON"||e.target.closest("button")) return;
+    e.preventDefault();
+    const startX=e.clientX, startY=e.clientY;
+    const startR=pos.right, startB=pos.bottom;
+    function onMove(ev){
+      const dx=startX-ev.clientX, dy=startY-ev.clientY;
+      setPos({right:Math.max(0,startR+dx), bottom:Math.max(0,startB+dy)});
+    }
+    function onUp(){document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",onUp);}
+    document.addEventListener("mousemove",onMove);
+    document.addEventListener("mouseup",onUp);
+  }
+  return (
+    <div ref={dragRef} onMouseDown={onMouseDown}
+      style={{position:"fixed",right:pos.right,bottom:pos.bottom,zIndex:9990,
+        background:"white",borderRadius:24,padding:"20px 28px 18px",
+        boxShadow:"0 12px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08)",
+        display:"flex",flexDirection:"column",alignItems:"center",minWidth:220,
+        userSelect:"none",cursor:"grab",fontFamily:"inherit"}}>
+      {/* Task / break label */}
+      <div style={{fontSize:12,fontWeight:600,color:"#a19f9d",letterSpacing:0.3,marginBottom:4,textTransform:"uppercase"}}>
+        {pomBreak ? breakLabel : "Focus"}
+      </div>
+      <div style={{fontSize:13,fontWeight:600,color:"#242424",marginBottom:14,maxWidth:180,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+        {pomBreak ? "Take a well-deserved rest" : taskName}
+      </div>
+      {/* SVG ring */}
+      <div style={{position:"relative",width:140,height:140}}>
+        <svg width="140" height="140" style={{transform:"rotate(-90deg)",display:"block"}}>
+          <circle cx="70" cy="70" r={R} fill="none" stroke="#f3f2f1" strokeWidth="9"/>
+          <circle cx="70" cy="70" r={R} fill="none" stroke={accent} strokeWidth="9"
+            strokeDasharray={`${dashLen.toFixed(2)} ${gapLen.toFixed(2)}`}
+            strokeLinecap="round"/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+          <span style={{fontSize:30,fontWeight:700,color:accent,fontVariantNumeric:"tabular-nums",letterSpacing:-1,lineHeight:1}}>
+            {fmtTime(pomTime)}
+          </span>
+          <span style={{fontSize:11,color:"#a19f9d",marginTop:4}}>
+            {pomBreak ? (isLongBreak?"15 min break":"5 min break") : "/ "+fmtTime(POMODORO_WORK)}
+          </span>
+        </div>
+      </div>
+      {/* Buttons row */}
+      <div style={{display:"flex",gap:14,marginTop:18,alignItems:"center"}}>
+        {!pomBreak && (
+          <button onClick={e=>{e.stopPropagation();onDone();}} title="Mark task as done"
+            style={{width:40,height:40,borderRadius:"50%",border:"2px solid #edebe9",background:"white",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.15s"}}
+            onMouseEnter={e=>{e.currentTarget.style.background="#f0faf0";e.currentTarget.style.borderColor="#16a34a";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="white";e.currentTarget.style.borderColor="#edebe9";}}>
+            <Ic n="check" sz={18} c="#16a34a"/>
+          </button>
+        )}
+        <button onClick={e=>{e.stopPropagation();onPause();}}
+          style={{width:56,height:56,borderRadius:"50%",border:"none",background:accent,cursor:"pointer",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            boxShadow:`0 4px 12px ${accent}55`,transition:"transform 0.1s,opacity 0.1s"}}
+          onMouseEnter={e=>e.currentTarget.style.transform="scale(1.06)"}
+          onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
+          {pomRun
+            ? <svg width="22" height="22" viewBox="0 0 22 22" fill="white"><rect x="5" y="4" width="4" height="14" rx="1.5"/><rect x="13" y="4" width="4" height="14" rx="1.5"/></svg>
+            : <svg width="22" height="22" viewBox="0 0 22 22" fill="white"><path d="M7 4l13 7-13 7z"/></svg>
+          }
+        </button>
+        <button onClick={e=>{e.stopPropagation();onStop();}} title="Stop"
+          style={{width:40,height:40,borderRadius:"50%",border:"2px solid #edebe9",background:"white",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="#fef2f2";e.currentTarget.style.borderColor="#e85c4a";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="white";e.currentTarget.style.borderColor="#edebe9";}}>
+          <Ic n="x" sz={16} c="#a19f9d"/>
+        </button>
+      </div>
+      {/* Daily count */}
+      <div style={{marginTop:14,display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#a19f9d"}}>
+        <Ic n="tomato" sz={14}/>
+        <span>Today <span style={{fontWeight:700,color:accent}}>{pomCount}</span>/{dailyGoal}</span>
+        {pomCount>0&&(
+          <span style={{display:"flex",gap:2,marginLeft:2}}>
+            {Array.from({length:Math.min(pomCount,dailyGoal)}).map((_,i)=>(
+              <span key={i} style={{width:6,height:6,borderRadius:"50%",background:accent,opacity:0.7,display:"inline-block"}}/>
+            ))}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TRow({task,selected,onSelect,onDone,onImp,onPom,pomTid,pomSid,tc,tl,draggable,onDragStart,onDragEnd,onDragOver,onDrop,dragOver,onCtx,mobile}) {
+  const [hov,setHov]=useState(false);
+  const isAct=pomTid===task.id&&!pomSid;
+  const sDone=(task.subtasks||[]).filter(s=>s.done).length, totSub=(task.subtasks||[]).length;
+  let bg="rgba(255,255,255,0.65)";
+  if(task.done) bg=selected?"rgba(255,255,255,0.5)":hov?"rgba(255,255,255,0.45)":"rgba(255,255,255,0.35)";
+  else if(selected) bg=`${tl}cc`;
+  else if(isAct||hov) bg="rgba(255,255,255,0.82)";
+  const m = mobile; // shorthand
+  return (
+    <div draggable={draggable}
+      onDragStart={onDragStart} onDragEnd={onDragEnd}
+      onDragOver={e=>{e.preventDefault();onDragOver&&onDragOver();}}
+      onDrop={e=>{e.preventDefault();onDrop&&onDrop();}}
+      onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      onClick={e=>{e.stopPropagation();onSelect();}}
+      onContextMenu={onCtx}
+      style={{display:"flex",alignItems:"center",gap:m?14:12,padding:m?"13px 16px":"10px 14px",
+        borderRadius:m?10:4,marginBottom:m?4:2,
+        background:bg,border:dragOver?`2px solid ${tc}`:"1px solid rgba(255,255,255,0.3)",
+        cursor:"grab",transition:"all 0.1s",backdropFilter:"blur(8px)"}}>
+      <CB checked={task.done} onChange={onDone} tc={tc} sz={m?22:18}/>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:m?17:14,textDecoration:task.done?"line-through":"none",color:task.done?"#8a8886":"#242424",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.text}</div>
+        <div style={{display:"flex",gap:8,marginTop:m?4:2,alignItems:"center",flexWrap:"wrap"}}>
+          {task.myDay&&<span style={{fontSize:m?13:11,color:task.done?"#b0aeac":"#605e5c",display:"flex",alignItems:"center",gap:2}}><Ic n="sun" sz={m?14:12} c={task.done?"#b0aeac":"#605e5c"}/> My Day</span>}
+          {task.dueDate&&(()=>{const od=!task.done&&isOverdue(task.dueDate);return <span style={{fontSize:m?13:11,color:task.done?"#b0aeac":od?"#d13438":"#605e5c",fontWeight:od?600:400,display:"flex",alignItems:"center",gap:2}}><Ic n="calendar" sz={m?14:12} c={task.done?"#b0aeac":od?"#d13438":"#605e5c"}/> {fmtDate(task.dueDate)}{od&&" Overdue"}</span>;})()}
+          {task.reminder&&!task.reminderFired&&<span style={{fontSize:m?13:11,color:"#605e5c",display:"flex",alignItems:"center",gap:2}}><Ic n="bell" sz={m?14:12} c="#605e5c"/> {fmtDateTime(task.reminder)}</span>}
+          {totSub>0&&<span style={{fontSize:m?13:11,color:task.done?"#b0aeac":"#605e5c"}}>{sDone}/{totSub}</span>}
+          {task.pomodoros>0&&<span style={{fontSize:m?13:11,color:task.done?"#b0aeac":"#605e5c",display:"flex",alignItems:"center",gap:2}}><Ic n="tomato" sz={m?14:12}/> {task.pomodoros}</span>}
+        </div>
+      </div>
+      <button onClick={e=>{e.stopPropagation();onPom();}} title="Start Pomodoro"
+        style={{background:"none",border:"none",cursor:"pointer",padding:4,borderRadius:4,opacity:isAct?1:(hov||m)?0.6:0,transition:"opacity 0.15s"}}>
+        <Ic n="tomato" sz={m?22:18}/>
+      </button>
+      <span onClick={e=>{e.stopPropagation();onImp();}} style={{cursor:"pointer",padding:m?4:2}}>
+        <Ic n={task.important?"starOn":"star"} sz={m?22:18} c={task.important?"#ffc83d":"#a19f9d"}/>
+      </span>
+    </div>
+  );
+}
+
+function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom,pomTask,tc,mobile}) {
+  const [newSt,setNewSt]=useState("");
+  const [showRem,setShowRem]=useState(false);
+  const [showDue,setShowDue]=useState(false);
+  const m = mobile;
+  return (
+    <div onClick={e=>e.stopPropagation()}
+      style={{width:m?"100%":340,background:"#faf9f8",borderLeft:m?"none":"1px solid #edebe9",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{padding:m?"18px 20px 14px":"16px 20px 12px",display:"flex",alignItems:"flex-start",gap:12,borderBottom:"1px solid #edebe9"}}>
+        <CB checked={task.done} onChange={()=>onUpdate({done:!task.done})} tc={tc} sz={m?22:18}/>
+        <input value={task.text} onChange={e=>onUpdate({text:e.target.value})}
+          style={{flex:1,border:"none",background:"transparent",fontSize:m?19:16,fontWeight:600,color:task.done?"#a19f9d":"#242424",outline:"none",fontFamily:"inherit",textDecoration:task.done?"line-through":"none"}}/>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
+        {/* Steps */}
+        <div style={{padding:m?"10px 20px":"8px 20px"}}>
+          {(task.subtasks||[]).map(st=>{
+            const isAct=pomTask?.taskId===task.id&&pomTask?.subtaskId===st.id;
+            return (
+              <div key={st.id} style={{display:"flex",alignItems:"center",gap:10,padding:m?"11px 14px":"8px 12px",borderRadius:m?8:4,marginBottom:m?4:2,background:isAct?"#eff6fc":"white",border:`1px solid ${isAct?"#c7e0f4":"#edebe9"}`}}>
+                <CB checked={st.done} onChange={()=>onTogSub(st.id)} sz={m?20:16} tc={tc}/>
+                <span style={{flex:1,fontSize:m?16:13,textDecoration:st.done?"line-through":"none",color:st.done?"#a19f9d":"#242424"}}>{st.text}</span>
+                <button onClick={()=>onPom(st.id,st.text)} style={{background:"none",border:"none",cursor:"pointer",padding:2,opacity:isAct?1:0.3}}><Ic n="tomato" sz={m?18:14}/></button>
+                <button onClick={()=>onDelSub(st.id)} style={{background:"none",border:"none",cursor:"pointer",padding:2}}><Ic n="x" sz={m?16:12} c="#a19f9d"/></button>
+              </div>
+            );
+          })}
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:4,border:"1px solid #edebe9",background:"white",marginTop:2}}>
+            <Ic n="plus" sz={16} c="#0078d4"/>
+            <input value={newSt} onChange={e=>setNewSt(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"&&newSt.trim()){onAddSub(newSt);setNewSt("");}}}
+              onKeyUp={e=>{if(e.key==="Enter"&&newSt.trim()){onAddSub(newSt);setNewSt("");}}}
+              placeholder="Add step"
+              style={{flex:1,border:"none",outline:"none",fontSize:m?16:13,color:"#242424",fontFamily:"inherit",background:"transparent"}}/>
+            {newSt.trim()&&(
+              <button onClick={()=>{onAddSub(newSt);setNewSt("");}}
+                style={{background:"#0078d4",border:"none",borderRadius:6,padding:m?"6px 14px":"4px 10px",cursor:"pointer",fontSize:m?15:13,fontWeight:600,color:"white",fontFamily:"inherit",flexShrink:0}}>
+                Add
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{height:1,background:"#edebe9",margin:"8px 20px"}}/>
+        {/* My Day */}
+        <DRow icon={<Ic n="sun" sz={m?22:18} c={task.myDay?"#0078d4":"#605e5c"}/>} active={task.myDay} onClick={()=>onUpdate({myDay:!task.myDay})} mobile={m}>
+          {task.myDay?"Added to My Day":"Add to My Day"}
+        </DRow>
+        <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+        {/* Remind me */}
+        <div style={{position:"relative"}}>
+          <DRow icon={<Ic n="bell" sz={m?22:18} c={task.reminder&&!task.reminderFired?"#0078d4":"#605e5c"}/>} active={task.reminder&&!task.reminderFired} onClick={()=>setShowRem(o=>!o)} mobile={m}>
+            {task.reminder&&!task.reminderFired?`Reminder: ${fmtDateTime(task.reminder)}`:"Remind me"}
+          </DRow>
+          {task.reminder&&!task.reminderFired&&(
+            <span onClick={()=>onUpdate({reminder:null,reminderFired:false})}
+              style={{position:"absolute",right:20,top:10,cursor:"pointer"}}><Ic n="x" sz={14} c="#a19f9d"/></span>
+          )}
+          {showRem&&(
+            <div style={{padding:"0 20px",position:"relative"}}>
+              <RemindPicker onSet={iso=>onUpdate({reminder:iso,reminderFired:false})} onClose={()=>setShowRem(false)}/>
+            </div>
+          )}
+        </div>
+        <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+        {/* Due date */}
+        <div style={{position:"relative"}}>
+          <DRow icon={<Ic n="calendar" sz={m?22:18} c={task.dueDate?"#0078d4":"#605e5c"}/>} active={!!task.dueDate} onClick={()=>setShowDue(o=>!o)} mobile={m}>
+            {task.dueDate ? fmtDate(task.dueDate) : "Add due date"}
+          </DRow>
+          {task.dueDate&&(
+            <span onClick={e=>{e.stopPropagation();onUpdate({dueDate:null});}}
+              style={{position:"absolute",right:20,top:m?14:10,cursor:"pointer"}}><Ic n="x" sz={m?18:14} c="#a19f9d"/></span>
+          )}
+          {showDue&&(
+            <div style={{padding:"0 20px",position:"relative"}}>
+              <DueDatePicker current={task.dueDate} onSet={d=>onUpdate({dueDate:d})} onClose={()=>setShowDue(false)}/>
+            </div>
+          )}
+        </div>
+        <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+        {/* Notes */}
+        <div style={{padding:m?"14px 20px":"12px 20px"}}>
+          <textarea value={task.notes||""} onChange={e=>onUpdate({notes:e.target.value})}
+            rows={m?5:4} placeholder="Add note"
+            style={{width:"100%",border:"none",outline:"none",fontSize:m?16:13,color:"#242424",fontFamily:"inherit",background:"transparent",resize:"vertical",lineHeight:1.5}}/>
+        </div>
+        {(task.pomodoros>0||(task.subtasks||[]).some(s=>s.pomodoros>0))&&(
+          <>
+            <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+            <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12,fontSize:m?15:13,color:"#605e5c"}}>
+              <Ic n="tomato" sz={m?20:18}/>
+              <span>{task.pomodoros+(task.subtasks||[]).reduce((a,s)=>a+(s.pomodoros||0),0)} pomodoros completed</span>
+            </div>
+          </>
+        )}
+      </div>
+      <div style={{padding:m?"14px 20px":"10px 20px",borderTop:"1px solid #edebe9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:m?14:12,color:"#a19f9d"}}>
+          Created {task.createdAt?new Date(task.createdAt).toLocaleDateString("en-US",{day:"numeric",month:"short"}):"today"}
+        </span>
+        <button onClick={onDelete} style={{background:"none",border:"none",cursor:"pointer",padding:m?8:4}}>
+          <Ic n="trash" sz={m?22:18} c="#a19f9d"/>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DRow({icon,children,active,onClick,mobile}){
+  const [hov,setHov]=useState(false);
+  return (
+    <div onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+      style={{padding:mobile?"14px 20px":"10px 20px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",fontSize:mobile?16:13,color:active?"#0078d4":"#242424",background:hov?"#f3f2f1":"transparent",transition:"background 0.1s"}}>
+      {icon}<span>{children}</span>
+    </div>
+  );
+}
+
+function PBtn(bg){ return {background:bg,color:"white",border:"none",borderRadius:4,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",fontFamily:"inherit"}; }
+function INP(){ return {border:"1px solid #d0cecc",borderRadius:4,padding:"6px 10px",background:"white",outline:"none",color:"#242424",fontFamily:"inherit",fontSize:13,width:"100%"}; }
+function BotBtn(){ return {display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:"6px 10px",borderRadius:4,fontSize:13,color:"#605e5c",fontFamily:"inherit",flex:1,justifyContent:"center"}; }
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
