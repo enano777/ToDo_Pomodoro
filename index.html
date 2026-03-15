@@ -28,6 +28,7 @@
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script>
     firebase.initializeApp({
       apiKey: "AIzaSyBf9XQNb_bXXg8-Bdln0mh7TznskadlA5Y",
@@ -38,7 +39,12 @@
       appId: "1:802556799588:web:79830e2b4e66ef71874d71"
     });
     const db = firebase.firestore();
-    const DATA_DOC = db.collection("app").doc("data");
+    const auth = firebase.auth();
+    // Enable offline persistence
+    db.enablePersistence({synchronizeTabs: true}).catch(()=>{});
+
+    function getUserDoc(uid){ return db.collection("users").doc(uid).collection("data").doc("main"); }
+    let _currentUid = null;
     let _saveTimer = null;
   </script>
 
@@ -119,7 +125,9 @@ function saveData(d) {
   // Debounce Firestore writes (1 second after last change)
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
-    DATA_DOC.set(d).catch(e => console.error("Firestore save error:", e));
+    if(_currentUid) {
+      getUserDoc(_currentUid).set(d).catch(e => console.error("Firestore save error:", e));
+    }
   }, 1000);
 }
 
@@ -153,6 +161,7 @@ function Ic({ n, sz=20, c="currentColor" }) {
     bell:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 2a5 5 0 015 5c0 4 2 5 2 5H3s2-1 2-5a5 5 0 015-5zM8.5 17a1.5 1.5 0 003 0"/></svg>,
     download:  <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 3v10M6 9l4 4 4-4M4 15h12"/></svg>,
     upload:    <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M10 13V3M6 7l4-4 4 4M4 15h12"/></svg>,
+    moon:      <svg style={s} viewBox="0 0 20 20" fill="none" stroke={c} strokeWidth="1.5"><path d="M17 10.5a7 7 0 11-14 0 7 7 0 0114 0z"/><path d="M12.5 7c0-1.4 1.1-2.5 2.5-2.5M7.5 11c0 1.4-1.1 2.5-2.5 2.5"/></svg>,
   };
   return map[n] || null;
 }
@@ -377,8 +386,162 @@ function RemindPicker({ onSet, onClose }) {
   );
 }
 
+// ================= AuthScreen =================
+function AuthScreen() {
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setError("Email and password required");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      if (isSignUp) {
+        await auth.createUserWithEmailAndPassword(email, password);
+      } else {
+        await auth.signInWithEmailAndPassword(email, password);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await auth.signInWithPopup(provider);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      height: "100vh", background: "#faf9f8", fontFamily: "inherit", padding: "20px"
+    }}>
+      <div style={{
+        width: "100%", maxWidth: 380, background: "white", borderRadius: 12,
+        padding: "40px 32px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+      }}>
+        <div style={{textAlign: "center", marginBottom: 32}}>
+          <div style={{fontSize: 28, fontWeight: 700, color: "#242424", marginBottom: 8}}>
+            📋 ToDo + Pomodoro
+          </div>
+          <div style={{fontSize: 13, color: "#8a8886"}}>
+            {isSignUp ? "Create your account" : "Sign in to your account"}
+          </div>
+        </div>
+
+        <form onSubmit={handleEmailAuth} style={{display: "flex", flexDirection: "column", gap: 12}}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{...INP(), fontSize: 14, padding: "10px 12px"}}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{...INP(), fontSize: 14, padding: "10px 12px"}}
+          />
+          {error && <div style={{fontSize: 13, color: "#d13438", padding: "8px 12px", background: "#fef2f2", borderRadius: 4}}>
+            {error}
+          </div>}
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              ...PBtn("#0078d4"),
+              width: "100%", padding: "10px", fontSize: 14, fontWeight: 600,
+              opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer"
+            }}
+          >
+            {loading ? "..." : (isSignUp ? "Create Account" : "Sign In")}
+          </button>
+        </form>
+
+        <div style={{display: "flex", alignItems: "center", gap: 12, margin: "20px 0"}}>
+          <div style={{flex: 1, height: 1, background: "#edebe9"}} />
+          <span style={{fontSize: 12, color: "#8a8886"}}>or</span>
+          <div style={{flex: 1, height: 1, background: "#edebe9"}} />
+        </div>
+
+        <button
+          onClick={handleGoogleSignIn}
+          disabled={loading}
+          style={{
+            width: "100%", padding: "10px", borderRadius: 4, border: "1px solid #d9d7d4",
+            background: "white", cursor: "pointer", fontSize: 14, fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            opacity: loading ? 0.6 : 1
+          }}
+        >
+          <span>🔵</span> Sign in with Google
+        </button>
+
+        <div style={{textAlign: "center", marginTop: 20, fontSize: 13, color: "#8a8886"}}>
+          {isSignUp ? "Already have an account? " : "Don't have an account? "}
+          <button
+            onClick={() => {setIsSignUp(!isSignUp); setError(""); setEmail(""); setPassword("");}}
+            style={{background: "none", border: "none", color: "#0078d4", cursor: "pointer", fontWeight: 600}}
+          >
+            {isSignUp ? "Sign in" : "Create one"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ================= Root Component (Auth State) =================
+function Root() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((u) => {
+      setUser(u);
+      if (u) {
+        _currentUid = u.uid;
+      } else {
+        _currentUid = null;
+      }
+      setAuthLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  if (authLoading) {
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100vh", background: "#faf9f8", fontSize: 18, color: "#8a8886"
+      }}>
+        Loading...
+      </div>
+    );
+  }
+
+  return user ? <App user={user} /> : <AuthScreen />;
+}
+
 // ================= Main App =================
-function App() {
+function App({ user }) {
   const [lists,     setLists]     = useState([]);
   const [groups,    setGroups]    = useState([]);
   const [tasks,     setTasks]     = useState([]);
@@ -430,6 +593,11 @@ function App() {
   const timerRef = useRef(null);
   const pomCountRef = useRef(0);
 
+  // Dark mode & sidebar resize
+  const [darkMode, setDarkMode] = useState(()=> localStorage.getItem('dm')==='1');
+  const [sidebarW, setSidebarW] = useState(280);
+  const resizingRef = useRef(false);
+
   // Load
   useEffect(()=>{
     // Load from localStorage immediately for fast startup (offline fallback)
@@ -437,7 +605,7 @@ function App() {
     if(local){ setLists(local.lists||[]); setGroups(local.groups||[]); setTasks(local.tasks||[]); if(local.hideComp!==undefined) setHideComp(local.hideComp); }
 
     // Subscribe to Firestore for real-time sync across all devices
-    const unsub = DATA_DOC.onSnapshot(snap => {
+    const unsub = getUserDoc(user.uid).onSnapshot(snap => {
       if(snap.exists) {
         const d = snap.data();
         setLists(d.lists||[]);
@@ -447,7 +615,7 @@ function App() {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {}
       } else if(local) {
         // First time: push local data to Firestore
-        DATA_DOC.set(local).catch(()=>{});
+        getUserDoc(user.uid).set(local).catch(()=>{});
       }
       setLoaded(true);
     }, err => {
@@ -458,10 +626,13 @@ function App() {
     // Request notification permission
     if(typeof Notification!=="undefined" && Notification.permission==="default") Notification.requestPermission();
     return () => unsub();
-  },[]);
+  },[user.uid]);
 
   // Save
   useEffect(()=>{ if(loaded) saveData({lists,groups,tasks,hideComp}); },[lists,groups,tasks,hideComp,loaded]);
+
+  // Dark mode
+  useEffect(()=>{ localStorage.setItem('dm', darkMode?'1':'0'); document.body.style.background = darkMode ? '#1e1e1e' : '#faf9f8'; }, [darkMode]);
 
   // Mobile resize
   useEffect(()=>{
@@ -838,22 +1009,42 @@ function App() {
     );
   }
 
+  // Theme object
+  const T = darkMode ? {
+    bg: '#1e1e1e', sidebar: '#252526', border: '#3d3d3d', text: '#e0e0e0',
+    textSub: '#9d9d9d', textMuted: '#6d6d6d', hover: '#2a2d2e',
+    sidebarHover: '#2a2d2e', sidebarActive: '#37373d', inputBg: '#3c3c3c',
+    rowBg: 'rgba(255,255,255,0.05)', rowBgHover: 'rgba(255,255,255,0.08)',
+    white: '#1e1e1e', card: '#252526'
+  } : {
+    bg: '#faf9f8', sidebar: '#e8e6e3', border: '#d9d7d4', text: '#242424',
+    textSub: '#605e5c', textMuted: '#8a8886', hover: '#f3f2f1',
+    sidebarHover: '#dddbd8', sidebarActive: '#d0cec9', inputBg: '#d9d7d4',
+    rowBg: 'rgba(255,255,255,0.65)', rowBgHover: 'rgba(255,255,255,0.8)',
+    white: '#ffffff', card: '#ffffff'
+  };
+
   return (
-    <div style={{display:"flex",flexDirection:"column",height:"100vh",fontSize:14,color:"#242424"}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",fontSize:14,color:T.text}}>
       {/* ========== MOBILE LAYOUT ========== */}
       {isMobile&&(
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
 
           {/* SCREEN 1: LISTS */}
           {mobileScreen==="lists"&&(
-            <div key="scr-lists" style={{display:"flex",flexDirection:"column",height:"100%",background:"white",animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
+            <div key="scr-lists" style={{display:"flex",flexDirection:"column",height:"100%",background:T.bg,animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
               {/* User header */}
-              <div style={{padding:"20px 20px 8px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                <div style={{width:46,height:46,borderRadius:"50%",background:"#0078d4",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,flexShrink:0}}>J</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:17,fontWeight:600,color:"#242424"}}>Juan Garcia</div>
-                  <div style={{fontSize:13,color:"#8a8886"}}>enano777@hotmail.com</div>
+              <div style={{padding:"52px 20px 8px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <div style={{width:46,height:46,borderRadius:"50%",background:"#0078d4",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,flexShrink:0}}>
+                  {(user.displayName || user.email || "U").charAt(0).toUpperCase()}
                 </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:17,fontWeight:600,color:T.text}}>{user.displayName || user.email}</div>
+                  <div style={{fontSize:13,color:T.textMuted}}>{user.email}</div>
+                </div>
+                <button onClick={()=>auth.signOut()} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",padding:8,borderRadius:4,display:"flex"}}>
+                  <Ic n="x" sz={20} c={T.textSub}/>
+                </button>
               </div>
               {/* Search */}
               <div style={{padding:"4px 16px 8px",flexShrink:0}}>
@@ -963,7 +1154,7 @@ function App() {
                 </div>
               )}
               {/* Bottom bar — sticky */}
-              <div style={{padding:"10px 16px",borderTop:"1px solid #edebe9",background:"white",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{padding:"10px 16px",borderTop:`1px solid ${T.border}`,background:T.bg,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                 <button onClick={()=>{setAddList(true);setAddGrp(false);}} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:"8px 0",fontSize:16,color:"#0078d4",fontFamily:"inherit",fontWeight:500}}>
                   <Ic n="plus" sz={22} c="#0078d4"/> New list
                 </button>
@@ -974,6 +1165,10 @@ function App() {
                     <rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 13v8M13 17h8"/>
                   </svg>
                 </button>
+                <button onClick={()=>setDarkMode(d=>!d)} title={darkMode?"Light mode":"Dark mode"}
+                  style={{background:"none",border:"none",cursor:"pointer",padding:8,display:"flex",borderRadius:8}}>
+                  <Ic n={darkMode?"sun":"moon"} sz={22} c="#0078d4"/>
+                </button>
               </div>
             </div>
           )}
@@ -983,7 +1178,7 @@ function App() {
             <div key="scr-tasks" style={{display:"flex",flexDirection:"column",height:"100%",position:"relative",animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
               <div style={{position:"absolute",inset:0,zIndex:0,background:`linear-gradient(180deg,${curTheme.color} 0%,${curTheme.bg} 35%,${curTheme.light} 100%)`,opacity:0.6,pointerEvents:"none"}}/>
               <div style={{position:"absolute",inset:0,zIndex:0,background:"linear-gradient(180deg,transparent 0%,rgba(250,249,248,0.25) 100%)",pointerEvents:"none"}}/>
-              <div style={{padding:"16px 16px 20px",position:"relative",zIndex:10}}>
+              <div style={{padding:"52px 16px 20px",position:"relative",zIndex:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <button onClick={()=>{setMobileScreen("lists");setSelTask(null);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:8,padding:"6px 8px",cursor:"pointer",display:"flex",alignItems:"center"}}>
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="white" strokeWidth="2.5"><path d="M13 4l-7 6 7 6"/></svg>
@@ -1134,22 +1329,27 @@ function App() {
       {/* ========== DESKTOP LAYOUT ========== */}
       {!isMobile&&<div style={{display:"flex",flex:1,overflow:"hidden"}}>
         {/* Sidebar */}
-        <div style={{width:sidebar?280:0,transition:"width 0.2s ease",background:"#e8e6e3",borderRight:"1px solid #d9d7d4",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
+        <div style={{width:sidebar?sidebarW:0,transition:"width 0.2s ease",background:T.sidebar,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
           {sidebar&&(
             <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
-              <div style={{padding:"16px 16px 8px",display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:32,height:32,borderRadius:"50%",background:"#0078d4",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:600}}>J</div>
-                <div>
-                  <div style={{fontSize:14,fontWeight:600}}>Juan Garcia</div>
-                  <div style={{fontSize:11,color:"#8a8886"}}>enano777@hotmail.com</div>
+              <div style={{padding:"44px 16px 8px",display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:32,height:32,borderRadius:"50%",background:"#0078d4",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:600}}>
+                  {(user.displayName || user.email || "U").charAt(0).toUpperCase()}
                 </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color:T.text}}>{user.displayName || user.email}</div>
+                  <div style={{fontSize:11,color:T.textMuted}}>{user.email}</div>
+                </div>
+                <button onClick={()=>auth.signOut()} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",padding:6,borderRadius:4,display:"flex"}}>
+                  <Ic n="x" sz={16} c={T.textSub}/>
+                </button>
               </div>
               <div style={{padding:"8px 12px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,background:"#d9d7d4",borderRadius:4,padding:"6px 10px"}}>
-                  <span style={{color:"#8a8886",fontSize:13}}>🔍</span>
+                <div style={{display:"flex",alignItems:"center",gap:8,background:T.inputBg,borderRadius:4,padding:"6px 10px"}}>
+                  <span style={{color:T.textSub,fontSize:13}}>🔍</span>
                   <input placeholder="Search" value={searchQ} onChange={e=>setSearchQ(e.target.value)}
-                    style={{border:"none",background:"transparent",outline:"none",fontSize:13,color:"#242424",flex:1,fontFamily:"inherit"}}/>
-                  {searchQ&&<span onClick={()=>setSearchQ("")} style={{cursor:"pointer",padding:2}}><Ic n="x" sz={12} c="#8a8886"/></span>}
+                    style={{border:"none",background:"transparent",outline:"none",fontSize:13,color:T.text,flex:1,fontFamily:"inherit"}}/>
+                  {searchQ&&<span onClick={()=>setSearchQ("")} style={{cursor:"pointer",padding:2}}><Ic n="x" sz={12} c={T.textSub}/></span>}
                 </div>
               </div>
               <div style={{flex:1,overflowY:"auto",padding:"4px 8px"}}>
@@ -1207,13 +1407,47 @@ function App() {
                 {addGrp&&<div style={{padding:"4px 12px"}}><input autoFocus value={newGrpN} onChange={e=>setNewGrpN(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addGrpFn();if(e.key==="Escape"){setAddGrp(false);setNewGrpN("");}}} onBlur={()=>{if(newGrpN.trim())addGrpFn();else setAddGrp(false);}} placeholder="Group name" style={INP()}/></div>}
                 </>)}
               </div>
-              <div style={{padding:"8px 12px",borderTop:"1px solid #d0cecc",display:"flex",gap:4}}>
-                <button onClick={()=>{setAddList(true);setAddGrp(false);}} style={BotBtn()}><Ic n="plus" sz={16} c="#605e5c"/> <span>New list</span></button>
-                <button onClick={()=>{setAddGrp(true);setAddList(false);}} style={BotBtn()}><Ic n="folder" sz={16} c="#605e5c"/> <span>New group</span></button>
+              <div style={{padding:"8px 12px",borderTop:`1px solid ${T.border}`,display:"flex",gap:4}}>
+                <button onClick={()=>{setAddList(true);setAddGrp(false);}} style={{...BotBtn(),color:T.textSub}}><Ic n="plus" sz={16} c={T.textSub}/> <span>New list</span></button>
+                <button onClick={()=>{setAddGrp(true);setAddList(false);}} style={{...BotBtn(),color:T.textSub}}><Ic n="folder" sz={16} c={T.textSub}/> <span>New group</span></button>
+                <button onClick={()=>setDarkMode(d=>!d)} title={darkMode?"Light mode":"Dark mode"} style={{...BotBtn(),color:T.textSub}}>
+                  <Ic n={darkMode?"sun":"moon"} sz={16} c={T.textSub}/>
+                </button>
               </div>
             </div>
           )}
         </div>
+
+        {/* Resize handle */}
+        {sidebar && (
+          <div
+            onMouseDown={e => {
+              e.preventDefault();
+              resizingRef.current = true;
+              const startX = e.clientX;
+              const startW = sidebarW;
+              const onMove = ev => {
+                if(!resizingRef.current) return;
+                const newW = Math.min(400, Math.max(180, startW + ev.clientX - startX));
+                setSidebarW(newW);
+              };
+              const onUp = () => {
+                resizingRef.current = false;
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+              };
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+            style={{
+              width: 4, cursor: 'col-resize', background: 'transparent', flexShrink: 0,
+              borderRight: `1px solid ${T.border}`, transition: 'background 0.15s', zIndex: 10,
+              position: 'relative'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#0078d4'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          />
+        )}
 
         {/* Main area */}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}
@@ -1223,7 +1457,7 @@ function App() {
           <div style={{position:"absolute",inset:0,zIndex:0,background:"linear-gradient(180deg,transparent 0%,rgba(250,249,248,0.25) 100%)",pointerEvents:"none"}}/>
 
           {/* Header */}
-          <div style={{padding:"28px 32px 20px",position:"relative",zIndex:10}}>
+          <div style={{padding:"44px 32px 20px",position:"relative",zIndex:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <button onClick={()=>setSidebar(s=>!s)} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:4,padding:4,cursor:"pointer",marginRight:4}}>
                 <Ic n="menu" sz={18} c="white"/>
@@ -1640,7 +1874,7 @@ function PBtn(bg){ return {background:bg,color:"white",border:"none",borderRadiu
 function INP(){ return {border:"1px solid #d0cecc",borderRadius:4,padding:"6px 10px",background:"white",outline:"none",color:"#242424",fontFamily:"inherit",fontSize:13,width:"100%"}; }
 function BotBtn(){ return {display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:"6px 10px",borderRadius:4,fontSize:13,color:"#605e5c",fontFamily:"inherit",flex:1,justifyContent:"center"}; }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
   </script>
 </body>
 </html>
