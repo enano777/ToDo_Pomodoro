@@ -414,6 +414,8 @@ function AuthScreen() {
     setLoading(false);
   };
 
+  const isElectron = typeof window !== "undefined" && window.navigator.userAgent.includes("Electron");
+
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError("");
@@ -475,6 +477,7 @@ function AuthScreen() {
           </button>
         </form>
 
+        {!isElectron && (<>
         <div style={{display: "flex", alignItems: "center", gap: 12, margin: "20px 0"}}>
           <div style={{flex: 1, height: 1, background: "#edebe9"}} />
           <span style={{fontSize: 12, color: "#8a8886"}}>or</span>
@@ -493,6 +496,7 @@ function AuthScreen() {
         >
           <span>🔵</span> Sign in with Google
         </button>
+        </>)}
 
         <div style={{textAlign: "center", marginTop: 20, fontSize: 13, color: "#8a8886"}}>
           {isSignUp ? "Already have an account? " : "Don't have an account? "}
@@ -596,7 +600,9 @@ function App({ user }) {
   // Dark mode & sidebar resize
   const [darkMode, setDarkMode] = useState(()=> localStorage.getItem('dm')==='1');
   const [sidebarW, setSidebarW] = useState(280);
+  const [detailW, setDetailW] = useState(340);
   const resizingRef = useRef(false);
+  const detailResizingRef = useRef(false);
 
   // Load
   useEffect(()=>{
@@ -991,7 +997,7 @@ function App({ user }) {
           <div onTouchStart={e=>startListDrag(e,l)}
             onContextMenu={e=>{e.preventDefault();e.stopPropagation();}}
             style={{touchAction:"none",padding:"4px 6px 4px 0",cursor:"grab",flexShrink:0,opacity:0.35}}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="#605e5c"><circle cx="5" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="10" cy="4" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="10" cy="12" r="1.3"/></svg>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill={T.textSub}><circle cx="5" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="10" cy="4" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="10" cy="12" r="1.3"/></svg>
           </div>
         )}
         <Ic n={l.icon||"list"} sz={icSz} c={th.color}/>
@@ -1002,9 +1008,9 @@ function App({ user }) {
             onClick={e=>e.stopPropagation()}
             style={{flex:1,border:"1px solid #0078d4",borderRadius:3,padding:"2px 6px",fontSize:mob?15:13,outline:"none",fontFamily:"inherit"}}/>
         ):(
-          <span style={{flex:1,color:"#242424",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:active?600:400}}>{l.name}</span>
+          <span style={{flex:1,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:active?600:400}}>{l.name}</span>
         )}
-        {count>0&&!isRen&&<span style={{fontSize:cntFz,color:"#8a8886"}}>{count}</span>}
+        {count>0&&!isRen&&<span style={{fontSize:cntFz,color:T.textMuted}}>{count}</span>}
       </div>
     );
   }
@@ -1024,8 +1030,11 @@ function App({ user }) {
     white: '#ffffff', card: '#ffffff'
   };
 
+  const isElectronApp = typeof window!=="undefined" && window.navigator.userAgent.includes("Electron");
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",fontSize:14,color:T.text}}>
+      {/* Electron window drag zone — invisible bar at top for dragging */}
+      {isElectronApp&&<div style={{position:"fixed",top:0,left:75,right:0,height:40,WebkitAppRegion:"drag",zIndex:10000,pointerEvents:"auto"}}/>}
       {/* ========== MOBILE LAYOUT ========== */}
       {isMobile&&(
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
@@ -1049,10 +1058,10 @@ function App({ user }) {
               {/* Search */}
               <div style={{padding:"4px 16px 8px",flexShrink:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,background:"#f3f2f1",borderRadius:10,padding:"9px 12px"}}>
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="#8a8886" strokeWidth="1.5"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke={T.textMuted} strokeWidth="1.5"><circle cx="9" cy="9" r="5"/><path d="M14 14l3 3"/></svg>
                   <input placeholder="Search" value={searchQ} onChange={e=>setSearchQ(e.target.value)}
-                    style={{border:"none",background:"transparent",outline:"none",fontSize:15,color:"#242424",flex:1,fontFamily:"inherit"}}/>
-                  {searchQ&&<span onClick={()=>setSearchQ("")} style={{cursor:"pointer",padding:4}}><Ic n="x" sz={14} c="#8a8886"/></span>}
+                    style={{border:"none",background:"transparent",outline:"none",fontSize:15,color:T.text,flex:1,fontFamily:"inherit"}}/>
+                  {searchQ&&<span onClick={()=>setSearchQ("")} style={{cursor:"pointer",padding:4}}><Ic n="x" sz={14} c={T.textMuted}/></span>}
                 </div>
               </div>
               {/* List items - scrollable */}
@@ -1061,7 +1070,7 @@ function App({ user }) {
                   const q=searchQ.toLowerCase();
                   const results=tasks.filter(t=>t.text.toLowerCase().includes(q)||(t.notes||"").toLowerCase().includes(q)||(t.subtasks||[]).some(s=>s.text.toLowerCase().includes(q)));
                   return results.length===0?(
-                    <div style={{textAlign:"center",padding:"40px 20px",color:"#8a8886"}}>
+                    <div style={{textAlign:"center",padding:"40px 20px",color:T.textMuted}}>
                       <div style={{fontSize:32,marginBottom:8,opacity:0.5}}>🔍</div>
                       <div style={{fontSize:16}}>No results for "{searchQ}"</div>
                     </div>
@@ -1095,20 +1104,20 @@ function App({ user }) {
                             onClick={e=>e.stopPropagation()}
                             style={{flex:1,border:"1px solid #0078d4",borderRadius:4,padding:"3px 8px",fontSize:17,fontWeight:600,fontFamily:"inherit",outline:"none"}}/>
                         ):(
-                          <span style={{flex:1,fontSize:17,fontWeight:600,color:"#242424"}}>{grp.name}</span>
+                          <span style={{flex:1,fontSize:17,fontWeight:600,color:T.text}}>{grp.name}</span>
                         )}
-                        {tot>0&&<span style={{fontSize:14,color:"#8a8886",marginRight:4}}>{tot}</span>}
+                        {tot>0&&<span style={{fontSize:14,color:T.textMuted,marginRight:4}}>{tot}</span>}
                         {/* ⋮ menu — RIGHT side, before chevron */}
                         <button onClick={e=>{e.stopPropagation();setCtx({x:e.clientX,y:e.clientY,items:[
                           {label:"Add or remove lists",icon:"list",onClick:()=>setGrpListPicker(grp.id)},
                           {label:"Rename group",icon:"rename",onClick:()=>{setRenamingGrp(grp.id);setRenameGrpVal(grp.name);}},
                           {label:"Ungroup lists",icon:"x",onClick:()=>delGrp(grp.id)},
                         ]});}} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 6px",display:"flex"}}>
-                          <Ic n="dots" sz={20} c="#a19f9d"/>
+                          <Ic n="dots" sz={20} c={T.textMuted}/>
                         </button>
                         <button onClick={()=>togGrp(grp.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 6px",display:"flex"}}>
                           <span style={{transition:"transform 0.2s",transform:grp.expanded?"rotate(0deg)":"rotate(-90deg)",display:"flex"}}>
-                            <Ic n="chevD" sz={22} c="#605e5c"/>
+                            <Ic n="chevD" sz={22} c={T.textSub}/>
                           </span>
                         </button>
                       </div>
@@ -1135,7 +1144,7 @@ function App({ user }) {
                     style={{margin:"8px 4px",padding:"14px 12px",borderRadius:10,textAlign:"center",
                       background:mDragOver?.type==='ungroup'?"rgba(0,180,0,0.07)":"#faf9f8",
                       border:mDragOver?.type==='ungroup'?"1px dashed #0b6a0b":"1px dashed #d9d7d4",
-                      fontSize:14,color:"#8a8886",transition:"all 0.15s"}}>
+                      fontSize:14,color:T.textMuted,transition:"all 0.15s"}}>
                     Drop here to ungroup
                   </div>
                 )}
@@ -1230,7 +1239,7 @@ function App({ user }) {
                   <input autoFocus value={newText} onChange={e=>setNewText(e.target.value)}
                     onKeyDown={e=>{if(e.key==="Enter"){addTask();setShowMobileAdd(false);}if(e.key==="Escape"){setShowMobileAdd(false);setNewText("");}}}
                     placeholder="Add a task"
-                    style={{flex:1,border:"none",outline:"none",fontSize:16,color:"#242424",fontFamily:"inherit",background:"transparent"}}/>
+                    style={{flex:1,border:"none",outline:"none",fontSize:16,color:T.text,fontFamily:"inherit",background:"transparent"}}/>
                   {newText.trim()&&<button onClick={()=>{addTask();setShowMobileAdd(false);}}
                     style={{background:curTheme.color,color:"white",border:"none",borderRadius:6,padding:"8px 16px",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Add</button>}
                 </div>
@@ -1243,12 +1252,12 @@ function App({ user }) {
             <div key="scr-detail" style={{display:"flex",flexDirection:"column",height:"100%",background:"#faf9f8",animation:`${slideDir.current==="right"?"slideFromRight":"slideFromLeft"} 0.25s ease-out`}}>
               <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #edebe9",background:"white",flexShrink:0}}>
                 <button onClick={()=>setMobileScreen("tasks")} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 8px 4px 0",display:"flex",alignItems:"center"}}>
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#605e5c" strokeWidth="2.5"><path d="M13 4l-7 6 7 6"/></svg>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke={T.textSub} strokeWidth="2.5"><path d="M13 4l-7 6 7 6"/></svg>
                 </button>
-                <span style={{fontSize:14,color:"#605e5c",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{curList?.name}</span>
+                <span style={{fontSize:14,color:T.textSub,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{curList?.name}</span>
               </div>
               <div style={{flex:1,overflowY:"auto"}}>
-                <Detail task={liveTask} tc={curTheme.color} mobile={true}
+                <Detail task={liveTask} tc={curTheme.color} mobile={true} T={T}
                   onClose={()=>setMobileScreen("tasks")}
                   onUpdate={p=>updTask(liveTask.id,p)}
                   onDelete={()=>{delTask(liveTask.id);setMobileScreen("tasks");}}
@@ -1283,13 +1292,13 @@ function App({ user }) {
                   </div>
                   {/* Header */}
                   <div style={{padding:"8px 20px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #edebe9",flexShrink:0}}>
-                    <span style={{fontSize:17,fontWeight:700,color:"#242424"}}>{grp.name}</span>
+                    <span style={{fontSize:17,fontWeight:700,color:T.text}}>{grp.name}</span>
                     <button onClick={()=>setGrpListPicker(null)}
                       style={{background:"none",border:"none",cursor:"pointer",padding:6,display:"flex",borderRadius:8}}>
-                      <Ic n="x" sz={20} c="#605e5c"/>
+                      <Ic n="x" sz={20} c={T.textSub}/>
                     </button>
                   </div>
-                  <div style={{fontSize:13,color:"#8a8886",padding:"8px 20px 4px",flexShrink:0}}>
+                  <div style={{fontSize:13,color:T.textMuted,padding:"8px 20px 4px",flexShrink:0}}>
                     Select lists to include in this group
                   </div>
                   {/* List of user lists */}
@@ -1304,9 +1313,9 @@ function App({ user }) {
                           <div style={{width:24,height:24,borderRadius:"50%",background:checked?"#0078d4":"transparent",border:checked?"none":"2px solid #8b8b8b",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
                             {checked&&<Ic n="check" sz={14} c="white"/>}
                           </div>
-                          <Ic n="list" sz={18} c="#605e5c"/>
-                          <span style={{flex:1,fontSize:16,color:"#242424"}}>{l.name}</span>
-                          <span style={{fontSize:13,color:"#8a8886"}}>{getCount(l.id)||""}</span>
+                          <Ic n="list" sz={18} c={T.textSub}/>
+                          <span style={{flex:1,fontSize:16,color:T.text}}>{l.name}</span>
+                          <span style={{fontSize:13,color:T.textMuted}}>{getCount(l.id)||""}</span>
                         </div>
                       );
                     })}
@@ -1527,9 +1536,23 @@ function App({ user }) {
           </div>
         </div>
 
-        {/* Detail panel */}
-        {liveTask&&(
-          <Detail task={liveTask} tc={curTheme.color}
+        {/* Detail panel resize handle + panel */}
+        {liveTask&&(<>
+          <div
+            onMouseDown={e=>{
+              e.preventDefault();
+              detailResizingRef.current=true;
+              const startX=e.clientX, startW=detailW;
+              const onMove=ev=>{if(!detailResizingRef.current)return; setDetailW(Math.min(520,Math.max(240,startW-(ev.clientX-startX))));};
+              const onUp=()=>{detailResizingRef.current=false;document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+              document.addEventListener('mousemove',onMove);
+              document.addEventListener('mouseup',onUp);
+            }}
+            onMouseEnter={e=>e.currentTarget.style.background='#0078d4'}
+            onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+            style={{width:4,cursor:'col-resize',background:'transparent',flexShrink:0,borderLeft:`1px solid ${T.border}`,transition:'background 0.15s',zIndex:10}}
+          />
+          <Detail task={liveTask} tc={curTheme.color} T={T} width={detailW}
             onClose={()=>setSelTask(null)}
             onUpdate={p=>updTask(liveTask.id,p)}
             onDelete={()=>delTask(liveTask.id)}
@@ -1539,7 +1562,7 @@ function App({ user }) {
             onPom={(sid,name)=>startPom(liveTask.id,sid||null,name)}
             pomTask={pomTask}
           />
-        )}
+        </>)}
       </div>}
 
       {ctx&&<CtxMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={()=>setCtx(null)}/>}
@@ -1752,18 +1775,19 @@ function TRow({task,selected,onSelect,onDone,onImp,onPom,pomTid,pomSid,tc,tl,dra
   );
 }
 
-function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom,pomTask,tc,mobile}) {
+function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom,pomTask,tc,mobile,T,width}) {
   const [newSt,setNewSt]=useState("");
   const [showRem,setShowRem]=useState(false);
   const [showDue,setShowDue]=useState(false);
   const m = mobile;
+  const dt = T || {bg:"#faf9f8",border:"#edebe9",text:"#242424",textSub:"#605e5c",textMuted:"#a19f9d",hover:"#f3f2f1",card:"white"};
   return (
     <div onClick={e=>e.stopPropagation()}
-      style={{width:m?"100%":340,background:"#faf9f8",borderLeft:m?"none":"1px solid #edebe9",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-      <div style={{padding:m?"18px 20px 14px":"16px 20px 12px",display:"flex",alignItems:"flex-start",gap:12,borderBottom:"1px solid #edebe9"}}>
+      style={{width:m?"100%":width||340,background:dt.bg,borderLeft:m?"none":`1px solid ${dt.border}`,display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
+      <div style={{padding:m?"18px 20px 14px":"16px 20px 12px",display:"flex",alignItems:"flex-start",gap:12,borderBottom:`1px solid ${dt.border}`}}>
         <CB checked={task.done} onChange={()=>onUpdate({done:!task.done})} tc={tc} sz={m?22:18}/>
         <input value={task.text} onChange={e=>onUpdate({text:e.target.value})}
-          style={{flex:1,border:"none",background:"transparent",fontSize:m?19:16,fontWeight:600,color:task.done?"#a19f9d":"#242424",outline:"none",fontFamily:"inherit",textDecoration:task.done?"line-through":"none"}}/>
+          style={{flex:1,border:"none",background:"transparent",fontSize:m?19:16,fontWeight:600,color:task.done?dt.textMuted:dt.text,outline:"none",fontFamily:"inherit",textDecoration:task.done?"line-through":"none"}}/>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
         {/* Steps */}
@@ -1771,21 +1795,20 @@ function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom
           {(task.subtasks||[]).map(st=>{
             const isAct=pomTask?.taskId===task.id&&pomTask?.subtaskId===st.id;
             return (
-              <div key={st.id} style={{display:"flex",alignItems:"center",gap:10,padding:m?"11px 14px":"8px 12px",borderRadius:m?8:4,marginBottom:m?4:2,background:isAct?"#eff6fc":"white",border:`1px solid ${isAct?"#c7e0f4":"#edebe9"}`}}>
+              <div key={st.id} style={{display:"flex",alignItems:"center",gap:10,padding:m?"11px 14px":"8px 12px",borderRadius:m?8:4,marginBottom:m?4:2,background:isAct?"#eff6fc":dt.card,border:`1px solid ${isAct?"#c7e0f4":dt.border}`}}>
                 <CB checked={st.done} onChange={()=>onTogSub(st.id)} sz={m?20:16} tc={tc}/>
-                <span style={{flex:1,fontSize:m?16:13,textDecoration:st.done?"line-through":"none",color:st.done?"#a19f9d":"#242424"}}>{st.text}</span>
+                <span style={{flex:1,fontSize:m?16:13,textDecoration:st.done?"line-through":"none",color:st.done?dt.textMuted:dt.text}}>{st.text}</span>
                 <button onClick={()=>onPom(st.id,st.text)} style={{background:"none",border:"none",cursor:"pointer",padding:2,opacity:isAct?1:0.3}}><Ic n="tomato" sz={m?18:14}/></button>
-                <button onClick={()=>onDelSub(st.id)} style={{background:"none",border:"none",cursor:"pointer",padding:2}}><Ic n="x" sz={m?16:12} c="#a19f9d"/></button>
+                <button onClick={()=>onDelSub(st.id)} style={{background:"none",border:"none",cursor:"pointer",padding:2}}><Ic n="x" sz={m?16:12} c={dt.textMuted}/></button>
               </div>
             );
           })}
-          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:4,border:"1px solid #edebe9",background:"white",marginTop:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:4,border:`1px solid ${dt.border}`,background:dt.card,marginTop:2}}>
             <Ic n="plus" sz={16} c="#0078d4"/>
             <input value={newSt} onChange={e=>setNewSt(e.target.value)}
               onKeyDown={e=>{if(e.key==="Enter"&&newSt.trim()){onAddSub(newSt);setNewSt("");}}}
-              onKeyUp={e=>{if(e.key==="Enter"&&newSt.trim()){onAddSub(newSt);setNewSt("");}}}
               placeholder="Add step"
-              style={{flex:1,border:"none",outline:"none",fontSize:m?16:13,color:"#242424",fontFamily:"inherit",background:"transparent"}}/>
+              style={{flex:1,border:"none",outline:"none",fontSize:m?16:13,color:dt.text,fontFamily:"inherit",background:"transparent"}}/>
             {newSt.trim()&&(
               <button onClick={()=>{onAddSub(newSt);setNewSt("");}}
                 style={{background:"#0078d4",border:"none",borderRadius:6,padding:m?"6px 14px":"4px 10px",cursor:"pointer",fontSize:m?15:13,fontWeight:600,color:"white",fontFamily:"inherit",flexShrink:0}}>
@@ -1794,20 +1817,20 @@ function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom
             )}
           </div>
         </div>
-        <div style={{height:1,background:"#edebe9",margin:"8px 20px"}}/>
+        <div style={{height:1,background:dt.border,margin:"8px 20px"}}/>
         {/* My Day */}
-        <DRow icon={<Ic n="sun" sz={m?22:18} c={task.myDay?"#0078d4":"#605e5c"}/>} active={task.myDay} onClick={()=>onUpdate({myDay:!task.myDay})} mobile={m}>
+        <DRow icon={<Ic n="sun" sz={m?22:18} c={task.myDay?"#0078d4":dt.textSub}/>} active={task.myDay} onClick={()=>onUpdate({myDay:!task.myDay})} mobile={m} dt={dt}>
           {task.myDay?"Added to My Day":"Add to My Day"}
         </DRow>
-        <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+        <div style={{height:1,background:dt.border,margin:"0 20px"}}/>
         {/* Remind me */}
         <div style={{position:"relative"}}>
-          <DRow icon={<Ic n="bell" sz={m?22:18} c={task.reminder&&!task.reminderFired?"#0078d4":"#605e5c"}/>} active={task.reminder&&!task.reminderFired} onClick={()=>setShowRem(o=>!o)} mobile={m}>
+          <DRow icon={<Ic n="bell" sz={m?22:18} c={task.reminder&&!task.reminderFired?"#0078d4":dt.textSub}/>} active={task.reminder&&!task.reminderFired} onClick={()=>setShowRem(o=>!o)} mobile={m} dt={dt}>
             {task.reminder&&!task.reminderFired?`Reminder: ${fmtDateTime(task.reminder)}`:"Remind me"}
           </DRow>
           {task.reminder&&!task.reminderFired&&(
             <span onClick={()=>onUpdate({reminder:null,reminderFired:false})}
-              style={{position:"absolute",right:20,top:10,cursor:"pointer"}}><Ic n="x" sz={14} c="#a19f9d"/></span>
+              style={{position:"absolute",right:20,top:10,cursor:"pointer"}}><Ic n="x" sz={14} c={dt.textMuted}/></span>
           )}
           {showRem&&(
             <div style={{padding:"0 20px",position:"relative"}}>
@@ -1815,15 +1838,15 @@ function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom
             </div>
           )}
         </div>
-        <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+        <div style={{height:1,background:dt.border,margin:"0 20px"}}/>
         {/* Due date */}
         <div style={{position:"relative"}}>
-          <DRow icon={<Ic n="calendar" sz={m?22:18} c={task.dueDate?"#0078d4":"#605e5c"}/>} active={!!task.dueDate} onClick={()=>setShowDue(o=>!o)} mobile={m}>
+          <DRow icon={<Ic n="calendar" sz={m?22:18} c={task.dueDate?"#0078d4":dt.textSub}/>} active={!!task.dueDate} onClick={()=>setShowDue(o=>!o)} mobile={m} dt={dt}>
             {task.dueDate ? fmtDate(task.dueDate) : "Add due date"}
           </DRow>
           {task.dueDate&&(
             <span onClick={e=>{e.stopPropagation();onUpdate({dueDate:null});}}
-              style={{position:"absolute",right:20,top:m?14:10,cursor:"pointer"}}><Ic n="x" sz={m?18:14} c="#a19f9d"/></span>
+              style={{position:"absolute",right:20,top:m?14:10,cursor:"pointer"}}><Ic n="x" sz={m?18:14} c={dt.textMuted}/></span>
           )}
           {showDue&&(
             <div style={{padding:"0 20px",position:"relative"}}>
@@ -1831,40 +1854,41 @@ function Detail({task,onClose,onUpdate,onDelete,onTogSub,onAddSub,onDelSub,onPom
             </div>
           )}
         </div>
-        <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
+        <div style={{height:1,background:dt.border,margin:"0 20px"}}/>
         {/* Notes */}
         <div style={{padding:m?"14px 20px":"12px 20px"}}>
           <textarea value={task.notes||""} onChange={e=>onUpdate({notes:e.target.value})}
             rows={m?5:4} placeholder="Add note"
-            style={{width:"100%",border:"none",outline:"none",fontSize:m?16:13,color:"#242424",fontFamily:"inherit",background:"transparent",resize:"vertical",lineHeight:1.5}}/>
+            style={{width:"100%",border:"none",outline:"none",fontSize:m?16:13,color:dt.text,fontFamily:"inherit",background:"transparent",resize:"vertical",lineHeight:1.5}}/>
         </div>
         {(task.pomodoros>0||(task.subtasks||[]).some(s=>s.pomodoros>0))&&(
           <>
-            <div style={{height:1,background:"#edebe9",margin:"0 20px"}}/>
-            <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12,fontSize:m?15:13,color:"#605e5c"}}>
+            <div style={{height:1,background:dt.border,margin:"0 20px"}}/>
+            <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12,fontSize:m?15:13,color:dt.textSub}}>
               <Ic n="tomato" sz={m?20:18}/>
               <span>{task.pomodoros+(task.subtasks||[]).reduce((a,s)=>a+(s.pomodoros||0),0)} pomodoros completed</span>
             </div>
           </>
         )}
       </div>
-      <div style={{padding:m?"14px 20px":"10px 20px",borderTop:"1px solid #edebe9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontSize:m?14:12,color:"#a19f9d"}}>
+      <div style={{padding:m?"14px 20px":"10px 20px",borderTop:`1px solid ${dt.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:dt.bg}}>
+        <span style={{fontSize:m?14:12,color:dt.textMuted}}>
           Created {task.createdAt?new Date(task.createdAt).toLocaleDateString("en-US",{day:"numeric",month:"short"}):"today"}
         </span>
         <button onClick={onDelete} style={{background:"none",border:"none",cursor:"pointer",padding:m?8:4}}>
-          <Ic n="trash" sz={m?22:18} c="#a19f9d"/>
+          <Ic n="trash" sz={m?22:18} c={dt.textMuted}/>
         </button>
       </div>
     </div>
   );
 }
 
-function DRow({icon,children,active,onClick,mobile}){
+function DRow({icon,children,active,onClick,mobile,dt}){
   const [hov,setHov]=useState(false);
+  const theme = dt || {hover:"#f3f2f1",text:"#242424"};
   return (
     <div onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-      style={{padding:mobile?"14px 20px":"10px 20px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",fontSize:mobile?16:13,color:active?"#0078d4":"#242424",background:hov?"#f3f2f1":"transparent",transition:"background 0.1s"}}>
+      style={{padding:mobile?"14px 20px":"10px 20px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",fontSize:mobile?16:13,color:active?"#0078d4":theme.text,background:hov?theme.hover:"transparent",transition:"background 0.1s"}}>
       {icon}<span>{children}</span>
     </div>
   );
